@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
+import OpenAI from 'openai';
 import { getSupabaseAdmin } from '@/lib/supabaseServer';
 import { extractText } from 'unpdf';
 import crypto from 'crypto';
@@ -23,7 +23,6 @@ function chunkText(text: string, chunkSize = 1200, overlap = 200): string[] {
       break;
     }
 
-    // Try to find the closest sentence end (. ! ? \n) near the chunk end
     const searchSlice = clean.slice(startIndex, endIndex);
     const lastPunctuation = Math.max(
       searchSlice.lastIndexOf('. '),
@@ -34,7 +33,6 @@ function chunkText(text: string, chunkSize = 1200, overlap = 200): string[] {
     );
 
     if (lastPunctuation > chunkSize * 0.6) {
-      // Break at punctuation
       endIndex = startIndex + lastPunctuation + 1;
     }
 
@@ -43,7 +41,6 @@ function chunkText(text: string, chunkSize = 1200, overlap = 200): string[] {
       chunks.push(chunk);
     }
 
-    // Advance by chunk length minus overlap
     startIndex = Math.max(startIndex + 1, endIndex - overlap);
   }
 
@@ -70,22 +67,15 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = getSupabaseAdmin();
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'GEMINI_API_KEY não configurada no servidor.' },
+        { error: 'OPENAI_API_KEY não configurada no servidor. Por favor, adicione sua chave nos Secrets/Configurações.' },
         { status: 500 }
       );
     }
 
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
+    const openai = new OpenAI({ apiKey });
 
     // 1. Download PDF from Storage bucket "workshop"
     const { data: fileBlob, error: downloadError } = await supabase
@@ -170,28 +160,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: 'vazio', message: 'Nenhum pedaço pôde ser gerado.' });
     }
 
-    // 8. Generate embeddings with gemini-embedding-001 in batches of up to 50
+    // 8. Generate embeddings with OpenAI text-embedding-3-small (dimensions: 1536)
     const batchSize = 50;
     const allChunksData: { documento_id: string; indice: number; conteudo: string; embedding: number[] }[] = [];
 
     for (let i = 0; i < rawChunks.length; i += batchSize) {
       const batch = rawChunks.slice(i, i + batchSize);
 
-      // Embed batch of text documents
-      const embedResponse = await ai.models.embedContent({
-        model: 'gemini-embedding-001',
-        contents: batch,
-        config: {
-          outputDimensionality: 1536,
-          taskType: 'RETRIEVAL_DOCUMENT',
-        },
+      const embedResponse = await openai.embeddings.create({
+        model: 'text-embedding-3-small',
+        input: batch,
+        dimensions: 1536,
       });
 
-      const embeddingsList = embedResponse.embeddings || [];
+      const embeddingsList = embedResponse.data || [];
 
       for (let j = 0; j < batch.length; j++) {
-        const rawVector = embeddingsList[j]?.values || [];
-        // 9. Normalize vector to unit length (L2 norm = 1)
+        const rawVector = embeddingsList[j]?.embedding || [];
         const normalizedVector = normalizeVector(rawVector);
 
         allChunksData.push({
@@ -203,7 +188,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 10. Insert chunks into kb_chunks in batches of 100
+    // 9. Insert chunks into kb_chunks in batches of 100
     for (let i = 0; i < allChunksData.length; i += 100) {
       const insertBatch = allChunksData.slice(i, i + 100);
       const { error: insertError } = await supabase
@@ -228,7 +213,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error('Erro geral na rota /api/indexar:', error);
     return NextResponse.json(
-      { error: error.message || 'Erro interno ao indexar documento.' },
+      { error: error?.message || 'Erro interno ao indexar documento.' },
       { status: 500 }
     );
   }

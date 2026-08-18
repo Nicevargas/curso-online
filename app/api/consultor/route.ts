@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
+import OpenAI from 'openai';
 import { getSupabaseAdmin } from '@/lib/supabaseServer';
 
 export const runtime = 'nodejs';
@@ -15,7 +15,6 @@ function normalizeVector(vector: number[]): number[] {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    // Support both { pergunta: string } and { prompt: string } or legacy { messages: [...] }
     const pergunta = body.pergunta || body.prompt || (Array.isArray(body.messages) ? body.messages[body.messages.length - 1]?.content : '');
 
     if (!pergunta || typeof pergunta !== 'string' || !pergunta.trim()) {
@@ -25,46 +24,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'GEMINI_API_KEY não configurada no servidor.' },
+        { error: 'OPENAI_API_KEY não configurada no servidor. Por favor, adicione sua chave nas configurações.' },
         { status: 500 }
       );
     }
 
     const supabase = getSupabaseAdmin();
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
+    const openai = new OpenAI({ apiKey });
+
+    // 1. Generate query embedding with OpenAI text-embedding-3-small (1536 dims)
+    const embedResponse = await openai.embeddings.create({
+      model: 'text-embedding-3-small',
+      input: pergunta.trim(),
+      dimensions: 1536,
     });
 
-    // 2. Generate question embedding with gemini-embedding-001 (RETRIEVAL_QUERY)
-    const embedResponse = await ai.models.embedContent({
-      model: 'gemini-embedding-001',
-      contents: pergunta.trim(),
-      config: {
-        outputDimensionality: 1536,
-        taskType: 'RETRIEVAL_QUERY',
-      },
-    });
-
-    const rawEmbedding = embedResponse.embeddings?.[0]?.values || (embedResponse as any).embedding?.values || [];
+    const rawEmbedding = embedResponse.data?.[0]?.embedding || [];
     if (rawEmbedding.length === 0) {
       return NextResponse.json(
-        { error: 'Não foi possível gerar o embedding da consulta.' },
+        { error: 'Não foi possível gerar o embedding da consulta com a OpenAI.' },
         { status: 500 }
       );
     }
 
-    // 3. Normalize vector to unit length
+    // 2. Normalize vector to unit length
     const normalizedEmbedding = normalizeVector(rawEmbedding);
 
-    // 4. Call supabase.rpc("kb_buscar_chunks", { consulta: vetor, qtd: 8, limiar: 0.15 })
+    // 3. Call supabase.rpc("kb_buscar_chunks", { consulta: vetor, qtd: 8, limiar: 0.15 })
     const { data: chunks, error: rpcError } = await supabase.rpc('kb_buscar_chunks', {
       consulta: normalizedEmbedding,
       qtd: 8,
@@ -79,7 +68,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // If no chunks returned, explicitly state that the topic is not in the material
+    // If no chunks found in the database
     if (!chunks || chunks.length === 0) {
       return NextResponse.json({
         resposta: 'Este assunto não foi encontrado no material do workshop Canva com IA. Para obter informações precisas, consulte os tópicos abordados nos módulos ou refaça a pergunta com outros termos.',
@@ -88,7 +77,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 5. Assemble context numbering excerpts as [1], [2], ... with file name
+    // 4. Assemble context with [1], [2] numbering and file references
     const fontesMap = new Map<number, { numero: number; nome: string; link: string | null; similaridade: number }>();
     const contextLines: string[] = [];
 
@@ -110,32 +99,32 @@ export async function POST(req: NextRequest) {
 
     const contextText = contextLines.join('\n---\n\n');
 
-    // 6. Call generateContent with strict system instruction
-    const systemInstruction = `Você é a consultora do workshop Canva com IA. Responda usando apenas os trechos do material fornecidos. Cite a fonte entre colchetes, como [1], a cada afirmação. Se os trechos não contiverem a resposta, diga isso com todas as letras em vez de deduzir ou inventar. Fale em português do Brasil, direto e sem enrolação.`;
+    // 5. Generate response using OpenAI gpt-4o-mini
+    const systemMessage = `Você é a consultora do workshop Canva com IA. Responda usando apenas os trechos do material fornecidos. Cite a fonte entre colchetes, como [1], a cada afirmação. Se os trechos não contiverem a resposta, diga isso com todas as letras em vez de deduzir ou inventar. Fale em português do Brasil, direto e sem enrolação.`;
 
-    const userPrompt = `Trechos do material do workshop:\n\n${contextText}\n\nPergunta do aluno: ${pergunta.trim()}`;
+    const userMessage = `Trechos do material do workshop:\n\n${contextText}\n\nPergunta do aluno: ${pergunta.trim()}`;
 
-    const generateResponse = await ai.models.generateContent({
-      model: 'gemini-3.7-flash',
-      contents: userPrompt,
-      config: {
-        systemInstruction,
-        temperature: 0.2,
-      },
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: systemMessage },
+        { role: 'user', content: userMessage },
+      ],
     });
 
-    const resposta = generateResponse.text || 'Não foi possível gerar a resposta.';
+    const resposta = completion.choices?.[0]?.message?.content || 'Não foi possível gerar a resposta.';
     const fontes = Array.from(fontesMap.values());
 
     return NextResponse.json({
       resposta,
-      text: resposta, // Compatibility with previous chat client
+      text: resposta,
       fontes,
     });
   } catch (error: any) {
     console.error('Erro na rota /api/consultor:', error);
     return NextResponse.json(
-      { error: error.message || 'Erro ao processar consulta com o material do workshop.' },
+      { error: error?.message || 'Erro ao processar consulta com a OpenAI.' },
       { status: 500 }
     );
   }

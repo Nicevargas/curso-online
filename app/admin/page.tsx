@@ -610,7 +610,7 @@ export default function AdminDashboardPage() {
                   <h2 className="text-lg font-bold text-white">Indexação de Materiais do Workshop</h2>
                 </div>
                 <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
-                  Os 11 PDFs do workshop contêm as apostilas e cadernos de exercícios. A indexação extrai os textos, gera os embeddings vetoriais (1536 dimensões) com o Gemini e atualiza a base do Supabase utilizada pela Consultora Lyra.
+                  Os 11 PDFs do workshop contêm as apostilas e cadernos de exercícios. A indexação extrai os textos, gera os embeddings vetoriais (1536 dimensões) com a OpenAI (text-embedding-3-small) e atualiza a base do Supabase utilizada pela Consultora Lyra (GPT-4o-mini).
                 </p>
               </div>
 
