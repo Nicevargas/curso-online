@@ -1,0 +1,6 @@
+{
+  "name": "canva com ia - o desafio",
+  "description": "Canva com IA - O Desafio",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

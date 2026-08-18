@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" fill="none">
+  <defs>
+    <linearGradient id="mistika-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9d4edd" />
+      <stop offset="50%" stop-color="#7311d4" />
+      <stop offset="100%" stop-color="#560bad" />
+    </linearGradient>
+    <linearGradient id="mistika-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="50%" stop-color="#d4af37" />
+      <stop offset="100%" stop-color="#b45309" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Mystical Icon Group -->
+  <g transform="translate(10, 8)">
+    <!-- Aura Ring -->
+    <circle cx="32" cy="32" r="28" stroke="url(#mistika-purple)" stroke-width="1.5" stroke-dasharray="2 4" opacity="0.6"/>
+    <circle cx="32" cy="32" r="24" stroke="url(#mistika-gold)" stroke-width="1" opacity="0.4"/>
+    
+    <!-- Crescent Moon -->
+    <path d="M 36 12 C 22 12 12 22 12 36 C 12 50 22 60 36 60 C 26 54 20 44 20 32 C 20 20 26 14 36 12 Z" 
+          fill="url(#mistika-purple)" />
+
+    <!-- 8-Point Star in Moon -->
+    <g transform="translate(36, 26)" filter="url(#glow)">
+      <!-- Main star rays -->
+      <polygon points="0,-12 3,-3 12,0 3,3 0,12 -3,3 -12,0 -3,-3" fill="url(#mistika-gold)"/>
+      <!-- Diagonal rays -->
+      <polygon points="0,-7 2,-2 7,0 2,2 0,7 -2,2 -7,0 -2,-2" transform="rotate(45)" fill="url(#mistika-gold)" opacity="0.8"/>
+      <!-- Center dot -->
+      <circle cx="0" cy="0" r="1.5" fill="#fff" />
+    </g>
+
+    <!-- Sparkle Accents -->
+    <circle cx="16" cy="18" r="1" fill="#f9e498" opacity="0.8"/>
+    <circle cx="48" cy="46" r="1.2" fill="#d4af37" opacity="0.9"/>
+    <circle cx="42" cy="14" r="0.8" fill="#fff" opacity="0.7"/>
+  </g>
+
+  <!-- Typography: MISTIKA -->
+  <text x="88" y="47" 
+        font-family="'Newsreader', Georgia, serif" 
+        font-size="34" 
+        font-weight="600" 
+        letter-spacing="0.08em" 
+        fill="#f8fafc">
+    MISTIKA
+  </text>
+
+  <!-- Subtitle: DESAFIO & TRANSFORMAÇÃO -->
+  <text x="90" y="62" 
+        font-family="system-ui, -apple-system, sans-serif" 
+        font-size="8.5" 
+        font-weight="600" 
+        letter-spacing="0.28em" 
+        fill="#d4af37" 
+        opacity="0.9">
+    JORNADA FEMININA
+  </text>
+</svg>
