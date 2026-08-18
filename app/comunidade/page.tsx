@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Image from 'next/image';
 import { getDirectDriveLink } from '@/lib/utils';
+import { useTheme } from '@/lib/ThemeContext';
 
 interface Member {
   id: string;
@@ -32,6 +33,9 @@ interface Post {
 }
 
 export default function ComunidadePage() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
   const [members, setMembers] = useState<Member[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [newPost, setNewPost] = useState('');
@@ -63,19 +67,16 @@ export default function ComunidadePage() {
 
   const fetchMembers = async (user: any) => {
     try {
-      // Fetch user profile to get role and level
       const { data: profile } = await supabase
         .from('profiles')
         .select('role, level')
         .eq('id', user.id)
         .single();
 
-      // Fetch all interactions to count them per user
       const { data: allInteractions } = await supabase
         .from('post_interactions')
         .select('user_id');
 
-      // Fetch all post authors
       const { data: allPosts } = await supabase
         .from('community_posts')
         .select('user_id');
@@ -97,23 +98,19 @@ export default function ComunidadePage() {
         .select('id, name, avatar_url, role, level')
         .in('id', Array.from(interactedUserIds));
 
-      // Apply filtering if not admin
-      if (profile && profile.role !== 'admin') {
-        query = query.eq('level', profile.level || 1);
-      } else if (!profile) {
-        query = query.eq('level', 1);
+      if (profile?.role !== 'admin' && !user.email?.includes('admin')) {
+        query = query.gte('level', profile?.level || 1);
       }
 
-      const { data, error } = await query
-        .order('level', { ascending: false })
-        .limit(20);
-      
-      if (data && !error) {
-        const membersWithCounts = data.map(m => ({
+      const { data, error } = await query.limit(10);
+
+      if (!error && data) {
+        const sortedMembers = data.map(m => ({
           ...m,
           interaction_count: interactionCounts[m.id] || 0
-        }));
-        setMembers(membersWithCounts);
+        })).sort((a, b) => (b.interaction_count || 0) - (a.interaction_count || 0));
+
+        setMembers(sortedMembers);
       }
     } catch (err) {
       console.error('Error fetching members:', err);
@@ -123,65 +120,71 @@ export default function ComunidadePage() {
   useEffect(() => {
     let isMounted = true;
 
-    async function checkAuthAndFetchData() {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) {
-        if (isMounted) window.location.href = '/login';
+    async function init() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        window.location.href = '/login';
         return;
       }
-      setCurrentUser(user);
+      if (isMounted) setCurrentUser(user);
 
-      try {
-        await Promise.all([
-          fetchMembers(user),
-          fetchPosts()
-        ]);
-      } catch (err) {
-        console.error('Error fetching community data:', err);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
+      await Promise.all([
+        fetchPosts(),
+        fetchMembers(user)
+      ]);
+
+      if (isMounted) setLoading(false);
     }
-    checkAuthAndFetchData();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
-        window.location.href = '/login';
-      }
-    });
+    init();
+
+    const postsSubscription = supabase
+      .channel('public:community_posts')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'community_posts' 
+      }, () => {
+        fetchPosts();
+      })
+      .subscribe();
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
+      supabase.removeChannel(postsSubscription);
     };
   }, []);
 
   const handleCreatePost = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPost.trim() || posting) return;
+    if (!newPost.trim() || !currentUser || posting) return;
 
     setPosting(true);
     try {
       const { error } = await supabase
         .from('community_posts')
-        .insert([{ content: newPost, user_id: currentUser.id }]);
+        .insert({
+          user_id: currentUser.id,
+          content: newPost.trim()
+        });
 
-      if (!error) {
-        setNewPost('');
-        await fetchPosts();
-      }
+      if (error) throw error;
+      setNewPost('');
+      await fetchPosts();
+      await fetchMembers(currentUser);
     } catch (err) {
       console.error('Error creating post:', err);
+      alert('Erro ao publicar mensagem.');
     } finally {
       setPosting(false);
     }
   };
 
-  const handleToggleLike = async (postId: string, hasLiked: boolean) => {
+  const handleLike = async (postId: string, currentLiked: boolean) => {
     if (!currentUser) return;
 
     try {
-      if (hasLiked) {
+      if (currentLiked) {
         await supabase
           .from('post_interactions')
           .delete()
@@ -190,12 +193,14 @@ export default function ComunidadePage() {
       } else {
         await supabase
           .from('post_interactions')
-          .insert([{ post_id: postId, user_id: currentUser.id }]);
+          .insert({
+            post_id: postId,
+            user_id: currentUser.id,
+            interaction_type: 'like'
+          });
       }
-      await Promise.all([
-        fetchPosts(),
-        fetchMembers(currentUser)
-      ]);
+      await fetchPosts();
+      await fetchMembers(currentUser);
     } catch (err) {
       console.error('Error toggling like:', err);
     }
@@ -203,7 +208,9 @@ export default function ComunidadePage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-background-dark flex items-center justify-center">
+      <main className={`min-h-screen flex items-center justify-center ${
+        isDark ? 'bg-[#000000]' : 'bg-[#f7f6f8]'
+      }`}>
         <motion.div 
           animate={{ rotate: 360 }}
           transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
@@ -214,152 +221,158 @@ export default function ComunidadePage() {
   }
 
   return (
-    <main className="min-h-screen bg-background-dark relative pb-24">
+    <main className={`min-h-screen relative pb-24 transition-colors duration-200 ${
+      isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'
+    }`}>
       <Header />
-      
+
       <div className="max-w-5xl mx-auto px-4 py-8">
-        <div className="flex flex-col gap-1 mb-8">
-          <div className="flex items-center gap-3">
-            <Users className="size-6 text-primary" />
-            <h1 className="text-2xl font-bold text-slate-100 font-display">Mentoria & Comunidade</h1>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+          <div>
+            <h1 className={`text-3xl font-bold font-display tracking-tight ${
+              isDark ? 'text-slate-100' : 'text-slate-900'
+            }`}>
+              Mentoria & Comunidade
+            </h1>
+            <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              Espaço de mentoria, feedback de artes no Canva e troca de ideias entre alunos.
+            </p>
           </div>
-          <p className="text-sm text-slate-400">Espaço para tirar dúvidas, compartilhar suas criações e trocar experiências do curso Canva com IA.</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Feed Column */}
-          <div className="lg:col-span-8 space-y-10">
-            {/* Post Creation */}
-            <div className="bg-white/5 border border-white/10 rounded-3xl p-6">
-              <form onSubmit={handleCreatePost} className="relative">
-                <textarea
-                  value={newPost}
-                  onChange={(e) => setNewPost(e.target.value)}
-                  placeholder="Compartilhe uma dúvida, um insight ou o link do seu design no Canva..."
-                  className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 pr-12 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-primary/50 transition-colors resize-none h-24"
-                />
-                <button 
+          {/* Main Feed Column */}
+          <div className="lg:col-span-8 space-y-6">
+            {/* Create Post Card */}
+            <form onSubmit={handleCreatePost} className={`p-5 rounded-3xl border ${
+              isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm'
+            }`}>
+              <textarea
+                value={newPost}
+                onChange={(e) => setNewPost(e.target.value)}
+                placeholder="Compartilhe seu projeto, dúvida ou evolução no Canva com IA..."
+                className={`w-full min-h-[100px] bg-transparent border-0 resize-none outline-none text-sm placeholder:text-slate-400 ${
+                  isDark ? 'text-slate-100' : 'text-slate-900'
+                }`}
+              />
+              <div className={`flex items-center justify-between pt-3 border-t ${
+                isDark ? 'border-white/5' : 'border-slate-100'
+              }`}>
+                <span className="text-[10px] text-slate-400">Respeite as diretrizes da comunidade</span>
+                <button
                   type="submit"
                   disabled={posting || !newPost.trim()}
-                  className="absolute bottom-4 right-4 p-2 rounded-xl bg-primary text-white hover:bg-primary-dark transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-white font-semibold text-xs tracking-wider uppercase transition-all shadow-md shadow-primary/20 disabled:opacity-50 cursor-pointer"
                 >
-                  <MessageCircle className="size-5" />
+                  {posting ? 'Publicando...' : 'Publicar'}
                 </button>
-              </form>
-            </div>
-
-            {/* Community Feed */}
-            <div className="space-y-6">
-              <div className="flex items-center gap-2 mb-4">
-                <TrendingUp className="size-4 text-primary" />
-                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Mural de Mensagens</h2>
               </div>
-              
+            </form>
+
+            {/* Posts Stream */}
+            <div className="space-y-4">
               {posts.length === 0 ? (
-                <div className="text-center py-10 bg-white/5 rounded-2xl border border-dashed border-white/10">
-                  <p className="text-slate-500 text-xs italic">Seja o primeiro a deixar uma mensagem.</p>
+                <div className={`p-12 text-center rounded-3xl border border-dashed ${
+                  isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'
+                }`}>
+                  <MessageCircle className="size-10 text-slate-400 mx-auto mb-3" />
+                  <p className="text-sm text-slate-500">Seja o primeiro a iniciar uma conversa na mentoria!</p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {posts.map((post) => (
-                    <motion.div
-                      key={post.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="bg-white/5 border border-white/10 rounded-2xl p-6"
-                    >
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="relative size-10 rounded-full overflow-hidden border border-white/10">
-                          <Image 
-                            src={(post.profiles?.avatar_url && post.profiles.avatar_url.trim() !== '') 
-                              ? getDirectDriveLink(post.profiles.avatar_url) 
-                              : `https://ui-avatars.com/api/?name=${encodeURIComponent(post.profiles?.name || 'Membro')}&background=7311d4&color=fff&bold=true`}
-                            alt={post.profiles?.name || 'Membro'}
-                            fill
-                            className="object-cover"
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="text-sm font-bold text-slate-200">{post.profiles?.name}</h4>
-                          <p className="text-[10px] text-slate-500">
-                            {new Date(post.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                          </p>
-                        </div>
+                posts.map((post) => (
+                  <motion.div
+                    key={post.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`p-6 rounded-3xl border transition-all ${
+                      isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="size-10 rounded-full overflow-hidden relative border border-primary/20 bg-primary/10">
+                        <Image
+                          src={getDirectDriveLink(post.profiles?.avatar_url) || `https://ui-avatars.com/api/?name=${encodeURIComponent(post.profiles?.name || 'A')}&background=7311d4&color=fff`}
+                          alt={post.profiles?.name || 'Membro'}
+                          fill
+                          className="object-cover"
+                          referrerPolicy="no-referrer"
+                          unoptimized
+                        />
                       </div>
-                      <p className="text-base text-slate-300 mb-6 leading-relaxed">
-                        {post.content}
-                      </p>
-                      <div className="flex items-center gap-4">
-                        <button 
-                          onClick={() => handleToggleLike(post.id, post.user_has_liked)}
-                          className={`flex items-center gap-1.5 text-xs font-medium transition-colors ${post.user_has_liked ? 'text-primary' : 'text-slate-500 hover:text-slate-300'}`}
-                        >
-                          <Star className={`size-4 ${post.user_has_liked ? 'fill-primary' : ''}`} />
-                          {post.likes_count}
-                        </button>
+                      <div>
+                        <h4 className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                          {post.profiles?.name || 'Aluno Canva IA'}
+                        </h4>
+                        <span className="text-[10px] text-slate-400">
+                          {new Date(post.created_at).toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
                       </div>
-                    </motion.div>
-                  ))}
-                </div>
+                    </div>
+
+                    <p className={`text-sm leading-relaxed whitespace-pre-line mb-4 ${
+                      isDark ? 'text-slate-200' : 'text-slate-700'
+                    }`}>
+                      {post.content}
+                    </p>
+
+                    <div className={`flex items-center gap-4 pt-3 border-t ${
+                      isDark ? 'border-white/5' : 'border-slate-100'
+                    }`}>
+                      <button
+                        onClick={() => handleLike(post.id, post.user_has_liked)}
+                        className={`flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                          post.user_has_liked
+                            ? 'text-primary'
+                            : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-900'
+                        }`}
+                      >
+                        <Star className={`size-4 ${post.user_has_liked ? 'fill-primary' : ''}`} />
+                        <span>{post.likes_count} Curtir</span>
+                      </button>
+                    </div>
+                  </motion.div>
+                ))
               )}
             </div>
           </div>
 
           {/* Members Sidebar */}
           <div className="lg:col-span-4 space-y-6">
-            <div className="sticky top-24 space-y-6">
+            <div className={`p-6 rounded-3xl border sticky top-24 ${
+              isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm'
+            }`}>
               <div className="flex items-center gap-2 mb-4">
-                <Star className="size-4 text-primary" />
-                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Membros da Egrégora</h2>
+                <Users className="size-5 text-primary" />
+                <h3 className={`text-lg font-bold font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                  Membros em Destaque
+                </h3>
               </div>
 
-              {members.length === 0 ? (
-                <div className="text-center py-20 bg-white/5 rounded-3xl border border-white/10">
-                  <p className="text-slate-500 italic text-sm">Nenhum membro encontrado ainda.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-4">
-                  {members.map((member, index) => (
-                    <motion.div
-                      key={member.id}
-                      initial={{ x: 20, opacity: 0 }}
-                      animate={{ x: 0, opacity: 1 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center gap-4 hover:bg-white/10 transition-colors"
-                    >
-                      <div className="relative size-12 rounded-full overflow-hidden border-2 border-primary/20">
-                        <Image 
-                          src={(member.avatar_url && member.avatar_url.trim() !== '') 
-                            ? getDirectDriveLink(member.avatar_url) 
-                            : `https://ui-avatars.com/api/?name=${encodeURIComponent(member.name || 'Membro')}&background=7311d4&color=fff&bold=true`} 
-                          alt={member.name} 
-                          fill 
+              <div className="space-y-3">
+                {members.map((member) => (
+                  <div key={member.id} className={`flex items-center justify-between p-2.5 rounded-2xl ${
+                    isDark ? 'hover:bg-white/5' : 'hover:bg-slate-50'
+                  } transition-colors`}>
+                    <div className="flex items-center gap-3">
+                      <div className="size-9 rounded-full overflow-hidden relative border border-primary/20">
+                        <Image
+                          src={getDirectDriveLink(member.avatar_url) || `https://ui-avatars.com/api/?name=${encodeURIComponent(member.name)}&background=7311d4&color=fff`}
+                          alt={member.name}
+                          fill
                           className="object-cover"
                           referrerPolicy="no-referrer"
+                          unoptimized
                         />
                       </div>
-                      
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <h3 className="text-sm font-bold text-slate-100">{member.name}</h3>
-                          {member.level > 5 && <Star className="size-3 text-accent-gold fill-accent-gold" />}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Shield className="size-3 text-primary" />
-                          <p className="text-[10px] text-slate-500 uppercase tracking-widest">
-                            {member.role} • Nível {member.level}
-                          </p>
-                        </div>
+                      <div>
+                        <p className={`text-xs font-bold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{member.name}</p>
+                        <span className="text-[10px] text-accent-gold font-semibold">Nível {member.level}</span>
                       </div>
-
-                      <button className="p-2 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all">
-                        <MessageCircle className="size-4" />
-                      </button>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium">{member.interaction_count} interações</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

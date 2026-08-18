@@ -11,6 +11,7 @@ import { BookOpen, Play, X, Sparkles, Clock, Users, MessageSquare, Users2, Check
 import Image from 'next/image';
 import Link from 'next/link';
 import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
+import { useTheme } from '@/lib/ThemeContext';
 
 interface JourneyItem {
   id: string;
@@ -35,6 +36,9 @@ interface LessonData {
 }
 
 export default function Page() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
   const [featuredJourneys, setFeaturedJourneys] = useState<JourneyItem[]>([]);
   const [featuredLesson, setFeaturedLesson] = useState<LessonData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -178,7 +182,9 @@ export default function Page() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-background-dark relative pb-24">
+    <main className={`min-h-screen relative pb-24 transition-colors duration-200 ${
+      isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'
+    }`}>
       <Header />
       <div className="max-w-5xl mx-auto px-0 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:pt-8">
@@ -196,18 +202,24 @@ export default function Page() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     whileHover={{ y: -4 }}
-                    className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary/25 to-accent-purple/20 border border-primary/30 p-6 h-full group transition-all hover:border-primary/60"
+                    className={`relative overflow-hidden rounded-3xl p-6 h-full group transition-all ${
+                      isDark 
+                        ? 'bg-gradient-to-br from-primary/25 to-accent-purple/20 border border-primary/30 hover:border-primary/60' 
+                        : 'bg-white border border-primary/20 shadow-sm hover:shadow-md hover:border-primary/40'
+                    }`}
                   >
                     <div className="absolute top-0 right-0 -mt-4 -mr-4 size-32 bg-primary/10 rounded-full blur-3xl group-hover:bg-primary/20 transition-colors" />
                     <div className="relative z-10">
                       <div className="size-12 rounded-2xl bg-primary/20 flex items-center justify-center mb-4 border border-primary/30">
                         <MessageSquare className="size-6 text-primary" />
                       </div>
-                      <h3 className="text-xl font-bold text-slate-100 mb-2 font-display">Conselheira & Consultora IA</h3>
-                      <p className="text-sm text-slate-400 leading-relaxed mb-4">
+                      <h3 className={`text-xl font-bold mb-2 font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                        Conselheira & Consultora IA
+                      </h3>
+                      <p className={`text-sm leading-relaxed mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                         Pesquise sobre as aulas do curso, tire dúvidas de Canva, crie prompts de imagens e receba consultoria estratégica.
                       </p>
-                      <div className="flex items-center gap-2 text-xs font-bold text-primary uppercase tracking-widest group-hover:text-white transition-colors">
+                      <div className="flex items-center gap-2 text-xs font-bold text-primary uppercase tracking-widest group-hover:text-primary transition-colors">
                         Consultar Agora
                         <Sparkles className="size-3" />
                       </div>
@@ -222,17 +234,27 @@ export default function Page() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     whileHover={{ y: -4 }}
-                    className="relative overflow-hidden rounded-3xl bg-white/5 border border-white/10 p-6 h-full group hover:border-primary/30 transition-all hover:bg-white/[0.07]"
+                    className={`relative overflow-hidden rounded-3xl p-6 h-full group transition-all ${
+                      isDark 
+                        ? 'bg-white/5 border border-white/10 hover:border-primary/30 hover:bg-white/[0.07]' 
+                        : 'bg-white border border-slate-200 shadow-sm hover:shadow-md hover:border-primary/30'
+                    }`}
                   >
                     <div className="relative z-10">
-                      <div className="size-12 rounded-2xl bg-white/10 flex items-center justify-center mb-4 border border-white/10">
-                        <Users2 className="size-6 text-slate-300" />
+                      <div className={`size-12 rounded-2xl flex items-center justify-center mb-4 border ${
+                        isDark ? 'bg-white/10 border-white/10' : 'bg-slate-100 border-slate-200'
+                      }`}>
+                        <Users2 className={`size-6 ${isDark ? 'text-slate-300' : 'text-slate-700'}`} />
                       </div>
-                      <h3 className="text-xl font-bold text-slate-100 mb-2 font-display">Mentoria & Comunidade</h3>
-                      <p className="text-sm text-slate-400 leading-relaxed mb-4">
+                      <h3 className={`text-xl font-bold mb-2 font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                        Mentoria & Comunidade
+                      </h3>
+                      <p className={`text-sm leading-relaxed mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                         Espaço de mentoria para compartilhar suas artes, tirar dúvidas práticas e interagir com os outros alunos.
                       </p>
-                      <div className="flex items-center gap-2 text-xs font-bold text-slate-300 uppercase tracking-widest group-hover:text-primary transition-colors">
+                      <div className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest group-hover:text-primary transition-colors ${
+                        isDark ? 'text-slate-300' : 'text-slate-700'
+                      }`}>
                         Acessar Mentoria
                         <ArrowRight className="size-3" />
                       </div>
@@ -247,18 +269,24 @@ export default function Page() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     whileHover={{ y: -4 }}
-                    className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-500/20 to-primary/20 border border-indigo-500/20 p-6 h-full group hover:border-indigo-500/50 transition-all"
+                    className={`relative overflow-hidden rounded-3xl p-6 h-full group transition-all ${
+                      isDark 
+                        ? 'bg-gradient-to-br from-indigo-500/20 to-primary/20 border border-indigo-500/20 hover:border-indigo-500/50' 
+                        : 'bg-white border border-indigo-200 shadow-sm hover:shadow-md hover:border-indigo-300'
+                    }`}
                   >
                     <div className="absolute top-0 right-0 -mt-4 -mr-4 size-32 bg-indigo-500/10 rounded-full blur-3xl group-hover:bg-indigo-500/20 transition-colors" />
                     <div className="relative z-10">
                       <div className="size-12 rounded-2xl bg-indigo-500/20 flex items-center justify-center mb-4 border border-indigo-500/30">
-                        <CheckSquare className="size-6 text-indigo-400" />
+                        <CheckSquare className="size-6 text-indigo-500" />
                       </div>
-                      <h3 className="text-xl font-bold text-slate-100 mb-2 font-display">Planner de Tarefas</h3>
-                      <p className="text-sm text-slate-400 leading-relaxed mb-4">
+                      <h3 className={`text-xl font-bold mb-2 font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                        Planner de Tarefas
+                      </h3>
+                      <p className={`text-sm leading-relaxed mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                         Organize seu fluxo de trabalho, prazos de postagens, criação de carrosséis e checklist de metas no Canva.
                       </p>
-                      <div className="flex items-center gap-2 text-xs font-bold text-indigo-400 uppercase tracking-widest group-hover:text-white transition-colors">
+                      <div className="flex items-center gap-2 text-xs font-bold text-indigo-500 uppercase tracking-widest group-hover:text-indigo-600 transition-colors">
                         Abrir Planner
                         <ArrowRight className="size-3" />
                       </div>
@@ -273,18 +301,24 @@ export default function Page() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     whileHover={{ y: -4 }}
-                    className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-accent-gold/20 to-amber-500/20 border border-accent-gold/20 p-6 h-full group hover:border-accent-gold/50 transition-all"
+                    className={`relative overflow-hidden rounded-3xl p-6 h-full group transition-all ${
+                      isDark 
+                        ? 'bg-gradient-to-br from-accent-gold/20 to-amber-500/20 border border-accent-gold/20 hover:border-accent-gold/50' 
+                        : 'bg-white border border-amber-200 shadow-sm hover:shadow-md hover:border-amber-300'
+                    }`}
                   >
                     <div className="absolute top-0 right-0 -mt-4 -mr-4 size-32 bg-accent-gold/10 rounded-full blur-3xl group-hover:bg-accent-gold/20 transition-colors" />
                     <div className="relative z-10">
                       <div className="size-12 rounded-2xl bg-accent-gold/20 flex items-center justify-center mb-4 border border-accent-gold/30">
                         <Lightbulb className="size-6 text-accent-gold" />
                       </div>
-                      <h3 className="text-xl font-bold text-slate-100 mb-2 font-display">Dicas de Conteúdo</h3>
-                      <p className="text-sm text-slate-400 leading-relaxed mb-4">
+                      <h3 className={`text-xl font-bold mb-2 font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                        Dicas de Conteúdo
+                      </h3>
+                      <p className={`text-sm leading-relaxed mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                         Prompts prontos para Canva IA, fórmulas de carrossel, ganchos magnéticos e paletas de cores profissionais.
                       </p>
-                      <div className="flex items-center gap-2 text-xs font-bold text-accent-gold uppercase tracking-widest group-hover:text-white transition-colors">
+                      <div className="flex items-center gap-2 text-xs font-bold text-accent-gold uppercase tracking-widest group-hover:text-amber-600 transition-colors">
                         Ver Dicas & Prompts
                         <Sparkles className="size-3" />
                       </div>

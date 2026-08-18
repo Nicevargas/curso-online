@@ -30,11 +30,36 @@ import {
   HelpCircle,
   Copy,
   ChevronRight,
-  BookOpen
+  BookOpen,
+  Database,
+  RefreshCw,
+  FileCheck,
+  Cpu,
+  Loader2
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
+
+const DOCUMENTOS = [
+  { arquivo: 'capitulo1 - workshop vergueiro.pdf',  nome: 'Capítulo 1',  link: 'https://drive.google.com/file/d/1tTAhVVUOlNV2uYKlsqQJiazJPfmDQWbK/view' },
+  { arquivo: 'capitulo2 - workshop vergueiro.pdf',  nome: 'Capítulo 2',  link: 'https://drive.google.com/file/d/10IYUtHLcjCCrC3ECyHOi8kf2FKEHbFJD/view' },
+  { arquivo: 'Capitulo3 - workshop vergueiro.pdf',  nome: 'Capítulo 3',  link: 'https://drive.google.com/file/d/13GfBiv0MBdROyVh6-waKs2itiDg_9_hA/view' },
+  { arquivo: 'Capitulo4 - workshop vergueiro.pdf',  nome: 'Capítulo 4',  link: 'https://drive.google.com/file/d/1CNfvg2MtzGOFXXQ1KWgZkK7oaXfajhXC/view' },
+  { arquivo: 'Capitulo5 - workshop vergueiro.pdf',  nome: 'Capítulo 5',  link: 'https://drive.google.com/file/d/1zpRZhF24SvHCYvvPFYo6T3rNOPbJYTyR/view' },
+  { arquivo: 'Capitulo6 - workshop vergueiro.pdf',  nome: 'Capítulo 6',  link: 'https://drive.google.com/file/d/1_r7pdkrI0jh7GTNKXisMuFzJswqIDiW8/view' },
+  { arquivo: 'Capitulo7 - workshop vergueiro.pdf',  nome: 'Capítulo 7',  link: 'https://drive.google.com/file/d/1J3LLwCr0wbB95WFLP5xyPBMXINWiRNAS/view' },
+  { arquivo: 'Capitulo8 - workshop vergueiro.pdf',  nome: 'Capítulo 8',  link: 'https://drive.google.com/file/d/13KFaJCPFc61Fm8r-TjUxyQxdT3p_2E3A/view' },
+  { arquivo: 'Capitulo9 - workshop vergueiro.pdf',  nome: 'Capítulo 9',  link: 'https://drive.google.com/file/d/1lHKouwU_f2PqD8FPFyR8-aJXwUXNp3-G/view' },
+  { arquivo: 'capitulo10 - workshop vergueiro.pdf', nome: 'Capítulo 10', link: 'https://drive.google.com/file/d/1WrI2AprQqYgvE3ODPYf6_qy8gIIWW2pm/view' },
+  { arquivo: 'Caderno_Exercicios_Workshop_Canva_IA.pdf', nome: 'Caderno de Exercícios', link: 'https://drive.google.com/file/d/1NQHB2LCy1aWTOsJ4lzmXDFGN1rd1U1e7/view' },
+];
+
+interface DocStatus {
+  status: 'idle' | 'loading' | 'ok' | 'sem alteracao' | 'vazio' | 'error';
+  pedacos?: number;
+  errorMsg?: string;
+}
 
 interface ContentItem {
   id: string;
@@ -87,6 +112,12 @@ export default function AdminDashboardPage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Tabs state ('aulas' | 'indexar')
+  const [activeTab, setActiveTab] = useState<'aulas' | 'indexar'>('aulas');
+  const [isIndexingAll, setIsIndexingAll] = useState(false);
+  const [indexingCurrentFile, setIndexingCurrentFile] = useState<string | null>(null);
+  const [docStatuses, setDocStatuses] = useState<Record<string, DocStatus>>({});
 
   // Stats
   const [stats, setStats] = useState({
@@ -334,6 +365,73 @@ export default function AdminDashboardPage() {
     }
   }
 
+  // Index single document via /api/indexar
+  async function handleIndexSingle(doc: { arquivo: string; nome: string; link: string }) {
+    setDocStatuses(prev => ({
+      ...prev,
+      [doc.arquivo]: { status: 'loading' }
+    }));
+
+    try {
+      const res = await fetch('/api/indexar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          arquivo: doc.arquivo,
+          nome: doc.nome,
+          link: doc.link
+        })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Falha ao indexar documento');
+      }
+
+      if (data.status === 'sem alteracao') {
+        setDocStatuses(prev => ({
+          ...prev,
+          [doc.arquivo]: { status: 'sem alteracao', pedacos: data.pedacos }
+        }));
+      } else if (data.status === 'vazio') {
+        setDocStatuses(prev => ({
+          ...prev,
+          [doc.arquivo]: { status: 'vazio', errorMsg: data.message || 'Sem texto extraível' }
+        }));
+      } else {
+        setDocStatuses(prev => ({
+          ...prev,
+          [doc.arquivo]: { status: 'ok', pedacos: data.pedacos }
+        }));
+      }
+      return true;
+    } catch (err: any) {
+      console.error(`Erro ao indexar ${doc.arquivo}:`, err);
+      setDocStatuses(prev => ({
+        ...prev,
+        [doc.arquivo]: { status: 'error', errorMsg: err.message || 'Erro inesperado' }
+      }));
+      return false;
+    }
+  }
+
+  // Index all documents sequentially (ONE BY ONE)
+  async function handleIndexAll() {
+    setIsIndexingAll(true);
+    showToast('Iniciando indexação sequencial dos documentos...');
+
+    for (let i = 0; i < DOCUMENTOS.length; i++) {
+      const doc = DOCUMENTOS[i];
+      setIndexingCurrentFile(doc.arquivo);
+      await handleIndexSingle(doc);
+    }
+
+    setIndexingCurrentFile(null);
+    setIsIndexingAll(false);
+    showToast('Processo de indexação concluído!');
+  }
+
   // Filter items
   const archetypesList = Array.from(new Set(items.map(i => i.archetype).filter(Boolean)));
 
@@ -473,265 +571,440 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        {/* Filter and Search Bar */}
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-8 bg-white/[0.02] p-4 rounded-3xl border border-white/5">
-          {/* Search Box */}
-          <div className="relative w-full md:w-80">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Buscar por título ou descrição..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-2xl pl-10 pr-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-primary/50 transition-colors"
-            />
-            {searchQuery && (
-              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
-                <X className="size-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Archetype / Module Filter Pills */}
-          <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto pb-2 md:pb-0 scrollbar-none">
+        {/* Navigation Tabs (Admin view) */}
+        {isAdmin && (
+          <div className="flex items-center gap-2 border-b border-white/10 pb-4">
             <button
-              onClick={() => setSelectedArchetype('todos')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-                selectedArchetype === 'todos'
-                  ? 'bg-primary text-white shadow-md shadow-primary/20'
-                  : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+              onClick={() => setActiveTab('aulas')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all border ${
+                activeTab === 'aulas'
+                  ? 'bg-primary text-white border-primary shadow-lg shadow-primary/20'
+                  : 'bg-white/5 text-slate-400 border-white/5 hover:bg-white/10 hover:text-white'
               }`}
             >
-              Todos ({items.length})
+              <Video className="size-4" />
+              Aulas & Conteúdos
             </button>
-            {archetypesList.map(arch => {
-              const count = items.filter(i => i.archetype === arch).length;
-              return (
-                <button
-                  key={arch}
-                  onClick={() => setSelectedArchetype(arch)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-                    selectedArchetype === arch
-                      ? 'bg-primary text-white shadow-md shadow-primary/20'
-                      : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
-                  }`}
-                >
-                  {arch} ({count})
-                </button>
-              );
-            })}
+            <button
+              onClick={() => setActiveTab('indexar')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold transition-all border ${
+                activeTab === 'indexar'
+                  ? 'bg-primary text-white border-primary shadow-lg shadow-primary/20'
+                  : 'bg-white/5 text-slate-400 border-white/5 hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              <Database className="size-4" />
+              Base de Conhecimento IA (RAG)
+            </button>
           </div>
-        </div>
+        )}
 
-        {/* Student Experience Live Preview View Mode */}
-        {isPreviewStudentMode ? (
+        {/* Tab 2: Base de Conhecimento (RAG Indexing) */}
+        {isAdmin && activeTab === 'indexar' ? (
           <div className="space-y-6">
-            <div className="p-4 rounded-2xl bg-accent-gold/10 border border-accent-gold/30 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Sparkles className="size-5 text-accent-gold shrink-0" />
-                <p className="text-sm text-accent-gold font-medium">
-                  <strong>Modo Experiência do Aluno:</strong> Você está visualizando o layout exatamente como os alunos veem ao acessar a aba Jornada.
+            {/* Header info banner */}
+            <div className="p-6 rounded-3xl bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/20 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Cpu className="size-4 text-primary" />
+                  <h2 className="text-lg font-bold text-white">Indexação de Materiais do Workshop</h2>
+                </div>
+                <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
+                  Os 11 PDFs do workshop contêm as apostilas e cadernos de exercícios. A indexação extrai os textos, gera os embeddings vetoriais (1536 dimensões) com o Gemini e atualiza a base do Supabase utilizada pela Consultora Lyra.
                 </p>
               </div>
-              <button 
-                onClick={() => setIsPreviewStudentMode(false)}
-                className="text-xs underline text-accent-gold hover:text-white font-bold"
+
+              <button
+                onClick={handleIndexAll}
+                disabled={isIndexingAll}
+                className="flex items-center justify-center gap-2 px-6 py-3 rounded-2xl text-xs sm:text-sm font-bold bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/30 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               >
-                Voltar à Edição Admin
+                {isIndexingAll ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    <span>Indexando...</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="size-4" />
+                    <span>Indexar Tudo (11 PDFs)</span>
+                  </>
+                )}
               </button>
             </div>
 
-            {/* Student Grid Preview */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredItems.map((challenge, index) => {
-                const isVideo = challenge.media_url || challenge.url;
-                const displayThumbnail = challenge.thumbnail_url
-                  ? getDirectDriveLink(challenge.thumbnail_url)
-                  : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=600&q=80';
+            {/* List of 11 Documents */}
+            <div className="grid grid-cols-1 gap-3">
+              {DOCUMENTOS.map((doc, idx) => {
+                const statusInfo = docStatuses[doc.arquivo] || { status: 'idle' };
+                const isCurrent = indexingCurrentFile === doc.arquivo;
 
                 return (
-                  <motion.div
-                    key={challenge.id}
-                    initial={{ opacity: 0, y: 15 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                    onClick={() => {
-                      if (isVideo) {
-                        setActiveVideoUrl(challenge.media_url || challenge.url);
-                      }
-                    }}
-                    className="group relative flex flex-col rounded-3xl bg-white/[0.04] border border-white/10 overflow-hidden hover:border-primary/50 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 cursor-pointer"
+                  <div
+                    key={doc.arquivo}
+                    className={`p-4 sm:p-5 rounded-3xl bg-white/[0.03] border transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                      isCurrent 
+                        ? 'border-primary/60 bg-primary/5 ring-1 ring-primary/30' 
+                        : 'border-white/10 hover:border-white/20'
+                    }`}
                   >
-                    <div className="relative aspect-video w-full overflow-hidden bg-black">
-                      <Image
-                        src={displayThumbnail}
-                        alt={challenge.title}
-                        fill
-                        className="object-cover group-hover:scale-105 transition-transform duration-500"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
-                      
-                      {isVideo && (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="size-12 rounded-full bg-primary/90 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                            <Play className="size-5 fill-current ml-0.5" />
-                          </div>
+                    <div className="flex items-center gap-4 min-w-0 flex-1">
+                      <div className={`size-12 rounded-2xl flex items-center justify-center shrink-0 border ${
+                        statusInfo.status === 'ok' 
+                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                          : statusInfo.status === 'sem alteracao'
+                          ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                          : statusInfo.status === 'error'
+                          ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                          : statusInfo.status === 'loading' || isCurrent
+                          ? 'bg-primary/20 text-primary border-primary/30'
+                          : 'bg-white/5 text-slate-400 border-white/10'
+                      }`}>
+                        {statusInfo.status === 'loading' || isCurrent ? (
+                          <Loader2 className="size-5 animate-spin" />
+                        ) : statusInfo.status === 'ok' || statusInfo.status === 'sem alteracao' ? (
+                          <FileCheck className="size-5" />
+                        ) : statusInfo.status === 'error' ? (
+                          <AlertCircle className="size-5" />
+                        ) : (
+                          <FileText className="size-5" />
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="text-xs font-bold text-white">
+                            {doc.nome}
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono truncate max-w-xs">
+                            ({doc.arquivo})
+                          </span>
                         </div>
-                      )}
 
-                      <div className="absolute top-3 left-3">
-                        <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-black/60 backdrop-blur-md text-slate-200 border border-white/10">
-                          {challenge.archetype}
-                        </span>
+                        {/* Status Message */}
+                        <div className="text-xs">
+                          {statusInfo.status === 'loading' || isCurrent ? (
+                            <span className="text-primary flex items-center gap-1.5 font-medium">
+                              <Loader2 className="size-3 animate-spin" /> Extraindo texto e gerando vetores...
+                            </span>
+                          ) : statusInfo.status === 'ok' ? (
+                            <span className="text-emerald-400 font-medium">
+                              Indexado com sucesso • {statusInfo.pedacos || 0} pedaços gerados
+                            </span>
+                          ) : statusInfo.status === 'sem alteracao' ? (
+                            <span className="text-blue-400 font-medium">
+                              Sem alteração (conteúdo idêntico já indexado)
+                            </span>
+                          ) : statusInfo.status === 'vazio' ? (
+                            <span className="text-amber-400 font-medium">
+                              Aviso: {statusInfo.errorMsg || 'PDF sem texto extraível'}
+                            </span>
+                          ) : statusInfo.status === 'error' ? (
+                            <span className="text-red-400 font-medium">
+                              Erro: {statusInfo.errorMsg}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">Pronto para indexação</span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="p-5 flex-1 flex flex-col justify-between">
-                      <div>
-                        <h3 className="text-base font-bold text-slate-100 group-hover:text-primary transition-colors font-display mb-2 line-clamp-1">
-                          {challenge.title}
-                        </h3>
-                        <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
-                          {challenge.description || 'Sem descrição cadastrada.'}
-                        </p>
-                      </div>
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 w-full sm:w-auto justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-white/5">
+                      <a
+                        href={doc.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 text-xs font-semibold transition-all"
+                      >
+                        <ExternalLink className="size-3.5" />
+                        <span>Ver PDF</span>
+                      </a>
 
-                      <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
-                        <span className="flex items-center gap-1.5">
-                          <Clock className="size-3.5 text-primary" />
-                          Aula do Módulo
-                        </span>
-                        <span className="text-primary font-semibold flex items-center gap-1">
-                          Assistir Aula <ChevronRight className="size-3.5" />
-                        </span>
-                      </div>
+                      <button
+                        onClick={() => handleIndexSingle(doc)}
+                        disabled={isIndexingAll || statusInfo.status === 'loading'}
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary/20 hover:bg-primary text-primary hover:text-white border border-primary/30 text-xs font-semibold transition-all disabled:opacity-50"
+                      >
+                        {statusInfo.status === 'loading' || isCurrent ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="size-3.5" />
+                        )}
+                        <span>Indexar</span>
+                      </button>
                     </div>
-                  </motion.div>
+                  </div>
                 );
               })}
             </div>
           </div>
         ) : (
-          /* Admin Table / Card CRUD View */
-          <div className="space-y-4">
-            {filteredItems.length === 0 ? (
-              <div className="text-center py-16 bg-white/[0.02] rounded-3xl border border-white/5">
-                <Video className="size-12 text-slate-600 mx-auto mb-3" />
-                <h3 className="text-base font-bold text-slate-300">Nenhum conteúdo encontrado</h3>
-                <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-6">
-                  {searchQuery 
-                    ? 'Tente ajustar sua busca ou filtro.' 
-                    : (isAdmin ? 'Comece cadastrando a primeira aula para sua turma.' : 'Nenhuma aula cadastrada nesta categoria.')}
-                </p>
-                {isAdmin && (
-                  <button
-                    onClick={handleOpenCreateModal}
-                    className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary/90 transition-all inline-flex items-center gap-2"
-                  >
-                    <Plus className="size-4" />
-                    Cadastrar Aula
+          <>
+            {/* Filter and Search Bar */}
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-8 bg-white/[0.02] p-4 rounded-3xl border border-white/5">
+              {/* Search Box */}
+              <div className="relative w-full md:w-80">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Buscar por título ou descrição..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl pl-10 pr-4 py-2.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-primary/50 transition-colors"
+                />
+                {searchQuery && (
+                  <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white">
+                    <X className="size-3.5" />
                   </button>
                 )}
               </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-3">
-                {filteredItems.map((item) => {
-                  const hasVideo = Boolean(item.media_url || item.url);
-                  const displayThumbnail = item.thumbnail_url
-                    ? getDirectDriveLink(item.thumbnail_url)
-                    : null;
 
+              {/* Archetype / Module Filter Pills */}
+              <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto pb-2 md:pb-0 scrollbar-none">
+                <button
+                  onClick={() => setSelectedArchetype('todos')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                    selectedArchetype === 'todos'
+                      ? 'bg-primary text-white shadow-md shadow-primary/20'
+                      : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                  }`}
+                >
+                  Todos ({items.length})
+                </button>
+                {archetypesList.map(arch => {
+                  const count = items.filter(i => i.archetype === arch).length;
                   return (
-                    <motion.div
-                      key={item.id}
-                      layout
-                      className="p-4 sm:p-5 rounded-3xl bg-white/[0.03] border border-white/10 hover:border-white/20 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group"
+                    <button
+                      key={arch}
+                      onClick={() => setSelectedArchetype(arch)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                        selectedArchetype === arch
+                          ? 'bg-primary text-white shadow-md shadow-primary/20'
+                          : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200'
+                      }`}
                     >
-                      {/* Left: Thumbnail & Info */}
-                      <div className="flex items-center gap-4 min-w-0 flex-1">
-                        <div className="relative size-16 sm:size-20 rounded-2xl bg-white/5 border border-white/10 overflow-hidden shrink-0 flex items-center justify-center">
-                          {displayThumbnail ? (
-                            <Image
-                              src={displayThumbnail}
-                              alt={item.title}
-                              fill
-                              className="object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <Video className="size-6 text-slate-600" />
-                          )}
-                          {hasVideo && (
-                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Play className="size-5 text-white fill-white" />
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-primary/20 text-primary border border-primary/30">
-                              {item.archetype || 'Geral'}
-                            </span>
-                            {hasVideo && (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                                <Video className="size-2.5" /> Vídeo Ativo
-                              </span>
-                            )}
-                          </div>
-
-                          <h3 className="text-base font-bold text-white truncate font-display">
-                            {item.title}
-                          </h3>
-
-                          <p className="text-xs text-slate-400 line-clamp-1 mt-0.5">
-                            {item.description || 'Sem descrição cadastrada'}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Right: Actions */}
-                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-white/5">
-                        {/* Play / Preview Video */}
-                        {hasVideo && (
-                          <button
-                            onClick={() => setActiveVideoUrl(item.media_url || item.url)}
-                            title="Assistir / Reproduzir"
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/20 hover:bg-primary text-primary hover:text-white border border-primary/30 text-xs font-semibold transition-all"
-                          >
-                            <Play className="size-3.5 fill-current" />
-                            <span>{isAdmin ? 'Testar' : 'Assistir'}</span>
-                          </button>
-                        )}
-
-                        {/* Admin-only Edit & Delete buttons */}
-                        {isAdmin && (
-                          <>
-                            <button
-                              onClick={() => handleOpenEditModal(item)}
-                              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-semibold transition-all"
-                            >
-                              <Edit3 className="size-3.5" />
-                              <span>Editar</span>
-                            </button>
-
-                            <button
-                              onClick={() => handleDeleteItem(item.id, item.title)}
-                              title="Excluir aula"
-                              className="p-2 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-colors"
-                            >
-                              <Trash2 className="size-3.5" />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </motion.div>
+                      {arch} ({count})
+                    </button>
                   );
                 })}
               </div>
+            </div>
+
+            {/* Student Experience Live Preview View Mode */}
+            {isPreviewStudentMode ? (
+              <div className="space-y-6">
+                <div className="p-4 rounded-2xl bg-accent-gold/10 border border-accent-gold/30 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Sparkles className="size-5 text-accent-gold shrink-0" />
+                    <p className="text-sm text-accent-gold font-medium">
+                      <strong>Modo Experiência do Aluno:</strong> Você está visualizando o layout exatamente como os alunos veem ao acessar a aba Jornada.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => setIsPreviewStudentMode(false)}
+                    className="text-xs underline text-accent-gold hover:text-white font-bold"
+                  >
+                    Voltar à Edição Admin
+                  </button>
+                </div>
+
+                {/* Student Grid Preview */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredItems.map((challenge, index) => {
+                    const isVideo = challenge.media_url || challenge.url;
+                    const displayThumbnail = challenge.thumbnail_url
+                      ? getDirectDriveLink(challenge.thumbnail_url)
+                      : 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=600&q=80';
+
+                    return (
+                      <motion.div
+                        key={challenge.id}
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        onClick={() => {
+                          if (isVideo) {
+                            setActiveVideoUrl(challenge.media_url || challenge.url);
+                          }
+                        }}
+                        className="group relative flex flex-col rounded-3xl bg-white/[0.04] border border-white/10 overflow-hidden hover:border-primary/50 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/10 cursor-pointer"
+                      >
+                        <div className="relative aspect-video w-full overflow-hidden bg-black">
+                          <Image
+                            src={displayThumbnail}
+                            alt={challenge.title}
+                            fill
+                            className="object-cover group-hover:scale-105 transition-transform duration-500"
+                            referrerPolicy="no-referrer"
+                            unoptimized
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
+                          
+                          {isVideo && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <div className="size-12 rounded-full bg-primary/90 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                                <Play className="size-5 fill-current ml-0.5" />
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="absolute top-3 left-3">
+                            <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-black/60 backdrop-blur-md text-slate-200 border border-white/10">
+                              {challenge.archetype}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="p-5 flex-1 flex flex-col justify-between">
+                          <div>
+                            <h3 className="text-base font-bold text-slate-100 group-hover:text-primary transition-colors font-display mb-2 line-clamp-1">
+                              {challenge.title}
+                            </h3>
+                            <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                              {challenge.description || 'Sem descrição cadastrada.'}
+                            </p>
+                          </div>
+
+                          <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
+                            <span className="flex items-center gap-1.5">
+                              <Clock className="size-3.5 text-primary" />
+                              Aula do Módulo
+                            </span>
+                            <span className="text-primary font-semibold flex items-center gap-1">
+                              Assistir Aula <ChevronRight className="size-3.5" />
+                            </span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              /* Admin Table / Card CRUD View */
+              <div className="space-y-4">
+                {filteredItems.length === 0 ? (
+                  <div className="text-center py-16 bg-white/[0.02] rounded-3xl border border-white/5">
+                    <Video className="size-12 text-slate-600 mx-auto mb-3" />
+                    <h3 className="text-base font-bold text-slate-300">Nenhum conteúdo encontrado</h3>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-6">
+                      {searchQuery 
+                        ? 'Tente ajustar sua busca ou filtro.' 
+                        : (isAdmin ? 'Comece cadastrando a primeira aula para sua turma.' : 'Nenhuma aula cadastrada nesta categoria.')}
+                    </p>
+                    {isAdmin && (
+                      <button
+                        onClick={handleOpenCreateModal}
+                        className="px-4 py-2 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary/90 transition-all inline-flex items-center gap-2"
+                      >
+                        <Plus className="size-4" />
+                        Cadastrar Aula
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3">
+                    {filteredItems.map((item) => {
+                      const hasVideo = Boolean(item.media_url || item.url);
+                      const displayThumbnail = item.thumbnail_url
+                        ? getDirectDriveLink(item.thumbnail_url)
+                        : null;
+
+                      return (
+                        <motion.div
+                          key={item.id}
+                          layout
+                          className="p-4 sm:p-5 rounded-3xl bg-white/[0.03] border border-white/10 hover:border-white/20 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group"
+                        >
+                          {/* Left: Thumbnail & Info */}
+                          <div className="flex items-center gap-4 min-w-0 flex-1">
+                            <div className="relative size-16 sm:size-20 rounded-2xl bg-white/5 border border-white/10 overflow-hidden shrink-0 flex items-center justify-center">
+                              {displayThumbnail ? (
+                                <Image
+                                  src={displayThumbnail}
+                                  alt={item.title}
+                                  fill
+                                  className="object-cover"
+                                  referrerPolicy="no-referrer"
+                                  unoptimized
+                                />
+                              ) : (
+                                <Video className="size-6 text-slate-600" />
+                              )}
+                              {hasVideo && (
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Play className="size-5 text-white fill-white" />
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-primary/20 text-primary border border-primary/30">
+                                  {item.archetype || 'Geral'}
+                                </span>
+                                {hasVideo && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                                    <Video className="size-2.5" /> Vídeo Ativo
+                                  </span>
+                                )}
+                              </div>
+
+                              <h3 className="text-base font-bold text-white truncate font-display">
+                                {item.title}
+                              </h3>
+
+                              <p className="text-xs text-slate-400 line-clamp-1 mt-0.5">
+                                {item.description || 'Sem descrição cadastrada'}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Right: Actions */}
+                          <div className="flex items-center gap-2 w-full sm:w-auto justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-white/5">
+                            {/* Play / Preview Video */}
+                            {hasVideo && (
+                              <button
+                                onClick={() => setActiveVideoUrl(item.media_url || item.url)}
+                                title="Assistir / Reproduzir"
+                                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary/20 hover:bg-primary text-primary hover:text-white border border-primary/30 text-xs font-semibold transition-all"
+                              >
+                                <Play className="size-3.5 fill-current" />
+                                <span>{isAdmin ? 'Testar' : 'Assistir'}</span>
+                              </button>
+                            )}
+
+                            {/* Admin-only Edit & Delete buttons */}
+                            {isAdmin && (
+                              <>
+                                <button
+                                  onClick={() => handleOpenEditModal(item)}
+                                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-semibold transition-all"
+                                >
+                                  <Edit3 className="size-3.5" />
+                                  <span>Editar</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handleDeleteItem(item.id, item.title)}
+                                  title="Excluir aula"
+                                  className="p-2 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-colors"
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             )}
-          </div>
+          </>
         )}
       </div>
 

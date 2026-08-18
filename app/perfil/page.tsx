@@ -46,6 +46,7 @@ export default function PerfilPage() {
   const [journeyTitle, setJourneyTitle] = useState<string | null>(null);
   const [availableJourneys, setAvailableJourneys] = useState<{ id: string, title: string }[]>([]);
   const [saving, setSaving] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
@@ -209,7 +210,7 @@ export default function PerfilPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-background-dark flex items-center justify-center">
+      <main className="min-h-screen bg-background-light dark:bg-background-dark flex items-center justify-center">
         <motion.div 
           animate={{ rotate: 360 }}
           transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
@@ -219,12 +220,13 @@ export default function PerfilPage() {
     );
   }
 
-  const displayAvatar = (profile?.avatar_url && profile.avatar_url.trim() !== '') 
+  const defaultAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.name || 'Aluno')}&background=7311d4&color=fff&bold=true`;
+  const displayAvatar = (!avatarError && profile?.avatar_url && profile.avatar_url.trim() !== '') 
     ? getDirectDriveLink(profile.avatar_url) 
-    : `https://ui-avatars.com/api/?name=${encodeURIComponent(profile?.name || 'Buscador')}&background=7311d4&color=fff&bold=true`;
+    : defaultAvatar;
 
   return (
-    <main className="min-h-screen bg-background-dark relative pb-24">
+    <main className="min-h-screen bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 relative pb-24 transition-colors duration-200">
       <Header />
       
       {/* Background Elements */}
@@ -237,7 +239,7 @@ export default function PerfilPage() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             className={`mb-6 p-4 rounded-2xl border ${
-              message.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'
+              message.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
             } text-sm flex items-center gap-3`}
           >
             {message.type === 'success' ? <CheckCircle2 className="size-5" /> : <AlertCircle className="size-5" />}
@@ -260,12 +262,14 @@ export default function PerfilPage() {
                   fill 
                   className="object-cover"
                   referrerPolicy="no-referrer"
+                  onError={() => setAvatarError(true)}
+                  unoptimized={displayAvatar.includes('googleusercontent.com') || displayAvatar.includes('drive.google.com')}
                 />
               </motion.div>
               {!isEditing && (
                 <button 
                   onClick={() => setIsEditing(true)}
-                  className="absolute bottom-4 right-0 size-10 bg-primary rounded-full flex items-center justify-center border-4 border-background-dark text-white shadow-lg hover:scale-110 transition-transform"
+                  className="absolute bottom-4 right-0 size-10 bg-primary rounded-full flex items-center justify-center border-4 border-background-light dark:border-background-dark text-white shadow-lg hover:scale-110 transition-transform cursor-pointer"
                 >
                   <Settings className="size-5" />
                 </button>
@@ -275,11 +279,11 @@ export default function PerfilPage() {
             {!isEditing ? (
               <div className="space-y-4">
                 <div>
-                  <h1 className="text-3xl font-bold text-slate-100 font-display mb-2">
+                  <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-100 font-display mb-2">
                     {profile?.name || 'Buscador Mistika'}
                   </h1>
                   {profile?.bio && (
-                    <p className="text-base text-slate-400 italic leading-relaxed max-w-sm">
+                    <p className="text-base text-slate-600 dark:text-slate-400 italic leading-relaxed max-w-sm">
                       &quot;{profile.bio}&quot;
                     </p>
                   )}

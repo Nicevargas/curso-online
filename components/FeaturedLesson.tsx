@@ -7,6 +7,7 @@ import Image from 'next/image';
 import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { updateUserGamification } from '@/lib/gamification';
+import { useTheme } from '@/lib/ThemeContext';
 
 interface LessonData {
   id: string;
@@ -26,9 +27,18 @@ interface FeaturedLessonProps {
 }
 
 export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
   const [checkingProgress, setCheckingProgress] = useState(true);
+  const [thumbnailError, setThumbnailError] = useState(false);
+
+  // Reset error when lesson changes
+  useEffect(() => {
+    setThumbnailError(false);
+  }, [lesson?.id, lesson?.capa_url]);
 
   useEffect(() => {
     async function checkProgress() {
@@ -103,7 +113,9 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
   if (loading) {
     return (
       <div className="px-4 sm:px-0">
-        <div className="w-full aspect-video bg-white/5 rounded-[32px] animate-pulse border border-white/10" />
+        <div className={`w-full aspect-video rounded-[32px] animate-pulse border ${
+          isDark ? 'bg-white/5 border-white/10' : 'bg-black/5 border-black/10'
+        }`} />
       </div>
     );
   }
@@ -111,9 +123,13 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
   if (!lesson) {
     return (
       <div className="px-4 sm:px-0">
-        <div className="p-12 rounded-[32px] bg-white/5 border border-dashed border-white/10 flex flex-col items-center justify-center text-center">
-          <Sparkles className="size-12 text-slate-700 mb-4" />
-          <p className="text-slate-500 font-medium">Nenhum conteúdo em destaque para hoje.</p>
+        <div className={`p-12 rounded-[32px] border border-dashed flex flex-col items-center justify-center text-center ${
+          isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'
+        }`}>
+          <Sparkles className={`size-12 mb-4 ${isDark ? 'text-slate-700' : 'text-slate-400'}`} />
+          <p className={`font-medium ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
+            Nenhum conteúdo em destaque para hoje.
+          </p>
         </div>
       </div>
     );
@@ -128,12 +144,19 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
               {lesson.categoria === 'Boas-vindas' ? 'Comece por aqui' : (lesson.categoria || 'Aula do Dia')}
             </span>
             {lesson.duracao && (
-              <span className="text-slate-500 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1">
+              <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1 ${
+                isDark ? 'text-slate-500' : 'text-slate-500'
+              }`}>
                 <Clock className="size-3" />
                 {lesson.duracao}
               </span>
             )}
           </div>
+          <h2 className={`text-2xl font-bold font-display tracking-tight ${
+            isDark ? 'text-slate-100' : 'text-slate-900'
+          }`}>
+            {lesson.titulo}
+          </h2>
         </div>
         
         {lesson.pdf_url && (
@@ -142,7 +165,11 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
             target="_blank"
             rel="noopener noreferrer"
             whileHover={{ y: -2 }}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 transition-all"
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-all ${
+              isDark 
+                ? 'bg-white/5 border-white/10 text-slate-300 hover:text-white hover:bg-white/10' 
+                : 'bg-white border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50 shadow-sm'
+            }`}
           >
             <FileText className="size-4 text-primary" />
             <span className="text-xs font-bold">Material de Apoio</span>
@@ -154,7 +181,9 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="relative aspect-video rounded-2xl overflow-hidden border border-white/10 bg-black/20"
+          className={`relative aspect-video rounded-2xl overflow-hidden border ${
+            isDark ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-slate-100 shadow-md'
+          }`}
         >
           <AnimatePresence mode="wait">
             {!isPlaying ? (
@@ -166,11 +195,17 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
                 className="absolute inset-0"
               >
                 <Image 
-                  src={getDirectDriveLink(lesson.capa_url) || "https://picsum.photos/seed/mistika/1280/720"}
+                  src={
+                    thumbnailError || !lesson.capa_url 
+                      ? "https://picsum.photos/seed/canva_ia/1280/720"
+                      : getDirectDriveLink(lesson.capa_url)
+                  }
                   alt={lesson.titulo}
                   fill
-                  className="object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-500"
+                  className="object-cover opacity-90 group-hover:opacity-100 transition-opacity duration-500"
                   referrerPolicy="no-referrer"
+                  onError={() => setThumbnailError(true)}
+                  unoptimized={lesson.capa_url?.includes('drive.google.com') || lesson.capa_url?.includes('googleusercontent.com')}
                 />
                 
                 {/* Play Button */}
@@ -180,7 +215,7 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
                       onClick={() => setIsPlaying(true)}
                       whileHover={{ scale: 1.1 }}
                       whileTap={{ scale: 0.9 }}
-                      className="size-16 rounded-full bg-primary text-white flex items-center justify-center shadow-xl"
+                      className="size-16 rounded-full bg-primary text-white flex items-center justify-center shadow-xl hover:bg-primary/90 transition-all cursor-pointer"
                     >
                       <Play className="size-8 fill-current ml-1" />
                     </motion.button>
@@ -219,10 +254,27 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
         </motion.div>
       </div>
 
-      <div className="mt-4">
-        <p className="text-slate-400 text-sm leading-relaxed line-clamp-3">
+      <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <p className={`text-sm leading-relaxed line-clamp-3 ${
+          isDark ? 'text-slate-400' : 'text-slate-600'
+        }`}>
           {lesson.descricao}
         </p>
+
+        <button
+          onClick={handleToggleComplete}
+          disabled={checkingProgress}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold transition-all shrink-0 ${
+            isCompleted
+              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+              : isDark
+                ? 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 shadow-sm'
+          }`}
+        >
+          <CheckCircle2 className={`size-4 ${isCompleted ? 'text-emerald-400' : 'text-slate-400'}`} />
+          <span>{isCompleted ? 'Concluída' : 'Marcar como Concluída'}</span>
+        </button>
       </div>
     </section>
   );

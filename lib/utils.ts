@@ -24,8 +24,8 @@ export function getDirectDriveLink(url: string | null | undefined): string {
     }
 
     if (fileId) {
-      // Retorna o link de visualização direta (thumbnail/uc)
-      return `https://drive.google.com/uc?export=view&id=${fileId}`;
+      // Usar o endpoint lh3.googleusercontent.com/d/FILE_ID que serve imagens públicas diretamente sem redirecionamento HTML ou tela de aviso
+      return `https://lh3.googleusercontent.com/d/${fileId}`;
     }
   } catch (e) {
     console.error('Erro ao converter link do Google Drive:', e);

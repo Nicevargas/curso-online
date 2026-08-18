@@ -10,6 +10,7 @@ import {
   Palette, Video, Image as ImageIcon, BookOpen, Flame
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useTheme } from '@/lib/ThemeContext';
 
 interface Task {
   id: string;
@@ -60,26 +61,29 @@ const DEFAULT_TASKS: Task[] = [
   },
   {
     id: '4',
-    title: 'Assistir aula do Desafio e aplicar o exercício prático',
+    title: 'Assistir aula de edição mágica de vídeo no Canva',
     category: 'estudo',
-    priority: 'alta',
-    dueDate: 'Esta semana',
+    priority: 'baixa',
+    dueDate: 'Esta Semana',
     completed: false,
     createdAt: new Date().toISOString()
   }
 ];
 
 export default function PlannerPage() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'todas' | 'pendentes' | 'concluidas'>('todas');
-  const [selectedCategory, setSelectedCategory] = useState<string>('todas');
-  
-  // New task form state
+  const [filter, setFilter] = useState<'all' | 'pending' | 'completed'>('all');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
+
+  // Form State
   const [newTitle, setNewTitle] = useState('');
   const [newCategory, setNewCategory] = useState<Task['category']>('carrossel');
-  const [newPriority, setNewPriority] = useState<Task['priority']>('alta');
+  const [newPriority, setNewPriority] = useState<Task['priority']>('media');
   const [newDueDate, setNewDueDate] = useState('Hoje');
 
   useEffect(() => {
@@ -90,45 +94,39 @@ export default function PlannerPage() {
         return;
       }
 
-      // Load tasks from localStorage
-      try {
-        const saved = localStorage.getItem(`canva_planner_tasks_${user.id}`);
-        if (saved) {
-          setTasks(JSON.parse(saved));
-        } else {
+      // Load from localStorage or defaults
+      const savedTasks = localStorage.getItem(`planner_tasks_${user.id}`);
+      if (savedTasks) {
+        try {
+          setTasks(JSON.parse(savedTasks));
+        } catch (e) {
           setTasks(DEFAULT_TASKS);
-          localStorage.setItem(`canva_planner_tasks_${user.id}`, JSON.stringify(DEFAULT_TASKS));
         }
-      } catch {
+      } else {
         setTasks(DEFAULT_TASKS);
-      } finally {
-        setLoading(false);
       }
+      setLoading(false);
     }
+
     init();
   }, []);
 
-  const saveTasks = async (updatedTasks: Task[]) => {
-    setTasks(updatedTasks);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
+  const saveTasks = (updated: Task[]) => {
+    setTasks(updated);
+    supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
-        localStorage.setItem(`canva_planner_tasks_${user.id}`, JSON.stringify(updatedTasks));
+        localStorage.setItem(`planner_tasks_${user.id}`, JSON.stringify(updated));
       }
-    } catch (e) {
-      console.error(e);
-    }
+    });
   };
 
-  const handleToggleTask = (taskId: string) => {
-    const updated = tasks.map(t => 
-      t.id === taskId ? { ...t, completed: !t.completed } : t
-    );
+  const handleToggleTask = (id: string) => {
+    const updated = tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t);
     saveTasks(updated);
   };
 
-  const handleDeleteTask = (taskId: string) => {
-    const updated = tasks.filter(t => t.id !== taskId);
+  const handleDeleteTask = (id: string) => {
+    const updated = tasks.filter(t => t.id !== id);
     saveTasks(updated);
   };
 
@@ -141,7 +139,7 @@ export default function PlannerPage() {
       title: newTitle.trim(),
       category: newCategory,
       priority: newPriority,
-      dueDate: newDueDate || 'Sem data',
+      dueDate: newDueDate,
       completed: false,
       createdAt: new Date().toISOString()
     };
@@ -151,20 +149,20 @@ export default function PlannerPage() {
     setShowAddModal(false);
   };
 
+  const filteredTasks = tasks.filter(t => {
+    const matchesFilter = filter === 'all' ? true : filter === 'completed' ? t.completed : !t.completed;
+    const matchesCategory = selectedCategory === 'all' ? true : t.category === selectedCategory;
+    return matchesFilter && matchesCategory;
+  });
+
   const completedCount = tasks.filter(t => t.completed).length;
   const pendingCount = tasks.length - completedCount;
-  const progressPercent = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
-
-  const filteredTasks = tasks.filter(t => {
-    if (filter === 'pendentes' && t.completed) return false;
-    if (filter === 'concluidas' && !t.completed) return false;
-    if (selectedCategory !== 'todas' && t.category !== selectedCategory) return false;
-    return true;
-  });
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-background-dark flex items-center justify-center">
+      <main className={`min-h-screen flex items-center justify-center ${
+        isDark ? 'bg-[#000000]' : 'bg-[#f7f6f8]'
+      }`}>
         <motion.div 
           animate={{ rotate: 360 }}
           transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
@@ -175,7 +173,9 @@ export default function PlannerPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background-dark flex flex-col relative pb-24">
+    <main className={`min-h-screen flex flex-col relative pb-24 transition-colors duration-200 ${
+      isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'
+    }`}>
       <Header />
       
       <div className="max-w-4xl mx-auto w-full px-4 py-8 space-y-8">
@@ -186,8 +186,12 @@ export default function PlannerPage() {
               <CheckSquare className="size-6 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-slate-100 font-display">Planner de Tarefas</h1>
-              <p className="text-xs text-slate-400">Organize sua rotina de criação no Canva com IA</p>
+              <h1 className={`text-2xl font-bold font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                Planner de Tarefas
+              </h1>
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                Organize sua rotina de criação no Canva com IA
+              </p>
             </div>
           </div>
 
@@ -202,170 +206,154 @@ export default function PlannerPage() {
 
         {/* Overview Stats Card */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex items-center justify-between">
+          <div className={`border rounded-2xl p-5 flex items-center justify-between ${
+            isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm'
+          }`}>
             <div>
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Pendentes</span>
-              <p className="text-2xl font-bold text-slate-100 mt-1">{pendingCount}</p>
+              <p className={`text-2xl font-bold mt-1 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{pendingCount}</p>
             </div>
             <div className="size-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
               <Clock className="size-5" />
             </div>
           </div>
 
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex items-center justify-between">
+          <div className={`border rounded-2xl p-5 flex items-center justify-between ${
+            isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm'
+          }`}>
             <div>
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Concluídas</span>
-              <p className="text-2xl font-bold text-emerald-400 mt-1">{completedCount}</p>
+              <p className={`text-2xl font-bold mt-1 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{completedCount}</p>
             </div>
             <div className="size-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
               <CheckCircle2 className="size-5" />
             </div>
           </div>
 
-          <div className="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Progresso Geral</span>
-              <span className="text-sm font-bold text-accent-gold">{progressPercent}%</span>
+          <div className={`border rounded-2xl p-5 flex items-center justify-between ${
+            isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm'
+          }`}>
+            <div>
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total de Metas</span>
+              <p className={`text-2xl font-bold mt-1 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{tasks.length}</p>
             </div>
-            <div className="w-full bg-white/10 rounded-full h-2 mt-3 overflow-hidden">
-              <div 
-                className="bg-gradient-to-r from-primary to-accent-gold h-full rounded-full transition-all duration-500"
-                style={{ width: `${progressPercent}%` }}
-              />
+            <div className="size-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+              <Sparkles className="size-5" />
             </div>
           </div>
         </div>
 
-        {/* Filter Controls */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-          {/* Status Tabs */}
-          <div className="flex items-center p-1 bg-white/5 border border-white/10 rounded-2xl">
-            {(['todas', 'pendentes', 'concluidas'] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setFilter(tab)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all capitalize ${
-                  filter === tab
-                    ? 'bg-primary text-white shadow-md'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {tab === 'todas' ? 'Todas' : tab === 'pendentes' ? 'Pendentes' : 'Concluídas'}
-              </button>
-            ))}
-          </div>
-
-          {/* Category Filter */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+        {/* Filters */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className={`flex items-center gap-1.5 p-1 rounded-2xl border w-fit ${
+            isDark ? 'bg-white/5 border-white/10' : 'bg-slate-100 border-slate-200'
+          }`}>
             <button
-              onClick={() => setSelectedCategory('todas')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all whitespace-nowrap ${
-                selectedCategory === 'todas'
-                  ? 'bg-primary/20 border-primary text-primary'
-                  : 'bg-white/5 border-white/10 text-slate-400 hover:text-slate-200'
+              onClick={() => setFilter('all')}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                filter === 'all' 
+                  ? 'bg-primary text-white shadow-md' 
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Todas Categorias
+              Todas ({tasks.length})
             </button>
-            {Object.entries(CATEGORY_MAP).map(([key, value]) => (
-              <button
-                key={key}
-                onClick={() => setSelectedCategory(key)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-all whitespace-nowrap flex items-center gap-1.5 ${
-                  selectedCategory === key
-                    ? 'bg-primary/20 border-primary text-primary'
-                    : 'bg-white/5 border-white/10 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <value.icon className="size-3" />
-                {value.label}
-              </button>
-            ))}
+            <button
+              onClick={() => setFilter('pending')}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                filter === 'pending' 
+                  ? 'bg-primary text-white shadow-md' 
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Pendentes ({pendingCount})
+            </button>
+            <button
+              onClick={() => setFilter('completed')}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                filter === 'completed' 
+                  ? 'bg-primary text-white shadow-md' 
+                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Concluídas ({completedCount})
+            </button>
           </div>
         </div>
 
         {/* Tasks List */}
         <div className="space-y-3">
-          <AnimatePresence mode="popLayout">
-            {filteredTasks.length === 0 ? (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="text-center py-16 bg-white/5 border border-dashed border-white/10 rounded-3xl"
-              >
-                <CheckSquare className="size-10 text-slate-600 mx-auto mb-3" />
-                <p className="text-slate-400 text-sm font-medium">Nenhuma tarefa encontrada neste filtro.</p>
-                <p className="text-slate-600 text-xs mt-1">Clique em &ldquo;Nova Tarefa&rdquo; para adicionar seus objetivos no Canva.</p>
-              </motion.div>
-            ) : (
-              filteredTasks.map((task) => {
-                const categoryInfo = CATEGORY_MAP[task.category] || CATEGORY_MAP.carrossel;
-                const CategoryIcon = categoryInfo.icon;
+          {filteredTasks.length === 0 ? (
+            <div className={`p-12 text-center rounded-3xl border border-dashed ${
+              isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'
+            }`}>
+              <CheckSquare className="size-10 text-slate-400 mx-auto mb-3" />
+              <p className="text-sm text-slate-500">Nenhuma tarefa encontrada neste filtro.</p>
+            </div>
+          ) : (
+            filteredTasks.map((task) => {
+              const cat = CATEGORY_MAP[task.category] || CATEGORY_MAP.carrossel;
+              const CatIcon = cat.icon;
+              return (
+                <motion.div
+                  key={task.id}
+                  layout
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`p-4 sm:p-5 rounded-2xl border transition-all flex items-center justify-between gap-4 ${
+                    task.completed 
+                      ? 'border-emerald-500/20 bg-emerald-500/5 opacity-75' 
+                      : isDark ? 'bg-white/5 border-white/10 hover:border-primary/40' : 'bg-white border-slate-200 shadow-sm hover:border-primary/40'
+                  }`}
+                >
+                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                    <button
+                      onClick={() => handleToggleTask(task.id)}
+                      className="shrink-0 transition-transform active:scale-90 cursor-pointer"
+                    >
+                      {task.completed ? (
+                        <CheckCircle2 className="size-6 text-emerald-400" />
+                      ) : (
+                        <Circle className="size-6 text-slate-400 hover:text-primary transition-colors" />
+                      )}
+                    </button>
 
-                return (
-                  <motion.div
-                    key={task.id}
-                    layout
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    className={`flex items-center justify-between p-4 sm:p-5 rounded-2xl border transition-all ${
-                      task.completed
-                        ? 'bg-white/[0.02] border-white/5 opacity-60'
-                        : 'bg-white/5 border-white/10 hover:border-primary/40 hover:bg-white/[0.07]'
-                    }`}
-                  >
-                    <div className="flex items-start sm:items-center gap-3.5 flex-1 min-w-0">
-                      <button
-                        onClick={() => handleToggleTask(task.id)}
-                        className={`size-6 rounded-lg border-2 flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 transition-all ${
-                          task.completed
-                            ? 'bg-emerald-500 border-emerald-500 text-white'
-                            : 'border-slate-500 hover:border-primary text-transparent'
-                        }`}
-                      >
-                        <CheckCircle2 className="size-4" />
-                      </button>
-
-                      <div className="flex-1 min-w-0 pr-3">
-                        <p className={`text-sm font-medium leading-relaxed truncate ${
-                          task.completed ? 'line-through text-slate-500' : 'text-slate-200'
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-sm font-medium transition-all truncate ${
+                        task.completed 
+                          ? 'line-through text-slate-400' 
+                          : isDark ? 'text-slate-100' : 'text-slate-900'
+                      }`}>
+                        {task.title}
+                      </p>
+                      
+                      <div className="flex flex-wrap items-center gap-2 mt-2">
+                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 uppercase tracking-wider ${cat.color}`}>
+                          <CatIcon className="size-3" />
+                          {cat.label}
+                        </span>
+                        
+                        <span className={`text-[10px] font-semibold flex items-center gap-1 ${
+                          isDark ? 'text-slate-400' : 'text-slate-500'
                         }`}>
-                          {task.title}
-                        </p>
-
-                        <div className="flex flex-wrap items-center gap-2 mt-2">
-                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[10px] font-semibold border ${categoryInfo.color}`}>
-                            <CategoryIcon className="size-3" />
-                            {categoryInfo.label}
-                          </span>
-
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] text-slate-400 bg-white/5 border border-white/5">
-                            <Calendar className="size-2.5" />
-                            {task.dueDate}
-                          </span>
-
-                          {task.priority === 'alta' && (
-                            <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold text-red-400 bg-red-500/10 border border-red-500/20">
-                              Alta
-                            </span>
-                          )}
-                        </div>
+                          <Calendar className="size-3" />
+                          {task.dueDate}
+                        </span>
                       </div>
                     </div>
+                  </div>
 
-                    <button
-                      onClick={() => handleDeleteTask(task.id)}
-                      className="p-2 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                      title="Excluir tarefa"
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
-                  </motion.div>
-                );
-              })
-            )}
-          </AnimatePresence>
+                  <button
+                    onClick={() => handleDeleteTask(task.id)}
+                    className="p-2 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0 cursor-pointer"
+                    title="Excluir tarefa"
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                </motion.div>
+              );
+            })
+          )}
         </div>
       </div>
 
@@ -383,22 +371,16 @@ export default function PlannerPage() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-lg bg-[#111111] border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6"
               onClick={(e) => e.stopPropagation()}
+              className={`w-full max-w-lg border rounded-3xl p-6 sm:p-8 shadow-2xl ${
+                isDark ? 'bg-[#121214] border-white/10 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+              }`}
             >
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-slate-100 font-display">Adicionar Nova Tarefa</h3>
-                <button
-                  onClick={() => setShowAddModal(false)}
-                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5"
-                >
-                  ✕
-                </button>
-              </div>
-
+              <h2 className="text-xl font-bold font-display mb-4">Adicionar Nova Tarefa</h2>
+              
               <form onSubmit={handleAddTask} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                     Título da Tarefa
                   </label>
                   <input
@@ -406,70 +388,66 @@ export default function PlannerPage() {
                     required
                     value={newTitle}
                     onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="Ex: Criar carrossel sobre prompts de IA"
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-slate-100 focus:outline-none focus:border-primary/50 transition-colors"
+                    placeholder="Ex: Criar carrossel sobre gatilhos mentais..."
+                    className={`w-full px-4 py-3 rounded-xl text-sm border outline-none ${
+                      isDark ? 'bg-white/5 border-white/10 text-slate-100 focus:border-primary' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-primary'
+                    }`}
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
                       Categoria
                     </label>
                     <select
                       value={newCategory}
                       onChange={(e) => setNewCategory(e.target.value as any)}
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-slate-200 focus:outline-none focus:border-primary/50 transition-colors"
+                      className={`w-full px-4 py-3 rounded-xl text-sm border outline-none ${
+                        isDark ? 'bg-[#1e1e24] border-white/10 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
+                      }`}
                     >
-                      <option value="carrossel" className="bg-[#111111]">Carrossel Canva</option>
-                      <option value="video" className="bg-[#111111]">Vídeo / Reels</option>
-                      <option value="post" className="bg-[#111111]">Post / Feed</option>
-                      <option value="story" className="bg-[#111111]">Stories / Banner</option>
-                      <option value="marca" className="bg-[#111111]">Identidade Visual</option>
-                      <option value="estudo" className="bg-[#111111]">Estudo do Curso</option>
+                      <option value="carrossel">Carrossel Canva</option>
+                      <option value="video">Vídeo / Reels</option>
+                      <option value="post">Post / Feed</option>
+                      <option value="story">Stories / Banner</option>
+                      <option value="marca">Identidade Visual</option>
+                      <option value="estudo">Estudo do Curso</option>
                     </select>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                      Prioridade
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                      Prazo
                     </label>
                     <select
-                      value={newPriority}
-                      onChange={(e) => setNewPriority(e.target.value as any)}
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-slate-200 focus:outline-none focus:border-primary/50 transition-colors"
+                      value={newDueDate}
+                      onChange={(e) => setNewDueDate(e.target.value)}
+                      className={`w-full px-4 py-3 rounded-xl text-sm border outline-none ${
+                        isDark ? 'bg-[#1e1e24] border-white/10 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
+                      }`}
                     >
-                      <option value="alta" className="bg-[#111111]">Alta Prioridade</option>
-                      <option value="media" className="bg-[#111111]">Média</option>
-                      <option value="baixa" className="bg-[#111111]">Baixa</option>
+                      <option value="Hoje">Hoje</option>
+                      <option value="Amanhã">Amanhã</option>
+                      <option value="Esta Semana">Esta Semana</option>
+                      <option value="Próxima Semana">Próxima Semana</option>
                     </select>
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                    Prazo / Dia
-                  </label>
-                  <input
-                    type="text"
-                    value={newDueDate}
-                    onChange={(e) => setNewDueDate(e.target.value)}
-                    placeholder="Ex: Hoje, Amanhã, 20/08"
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-slate-100 focus:outline-none focus:border-primary/50 transition-colors"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-3 pt-4 border-t border-white/5">
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/5">
                   <button
                     type="button"
                     onClick={() => setShowAddModal(false)}
-                    className="px-5 py-3 rounded-2xl text-xs font-bold text-slate-400 hover:text-white uppercase tracking-wider transition-colors"
+                    className={`px-5 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
+                      isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+                    }`}
                   >
                     Cancelar
                   </button>
                   <button
                     type="submit"
-                    className="px-6 py-3 rounded-2xl bg-primary hover:bg-primary/90 text-white text-xs font-bold uppercase tracking-wider transition-all shadow-lg shadow-primary/20"
+                    className="px-6 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold uppercase tracking-wider shadow-md shadow-primary/20"
                   >
                     Salvar Tarefa
                   </button>

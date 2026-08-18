@@ -10,6 +10,7 @@ import {
   ArrowRight, Bookmark, Tag, Send
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useTheme } from '@/lib/ThemeContext';
 
 interface ContentTip {
   id: string;
@@ -58,30 +59,34 @@ const CONTENT_TIPS: ContentTip[] = [
     category: 'paletas',
     title: 'Paleta Autoridade & Luxo Minimalista',
     description: 'Combinação de códigos hexadecimais perfeita para marcas sofisticadas.',
-    copyableContent: '• Preto Noite: #121214\n• Dourado Nobre: #D4AF37\n• Bege Areia / Linho: #EFECE6\n• Cinza Titânio: #71717A\n• Dica de Fontes: Newsreader / Playfair Display (Títulos) + Inter / Montserrat (Textos)',
-    tags: ['Cores', 'Branding', 'Tipografia']
+    copyableContent: '• Preto Nobre: #121214\n• Dourado Imperial: #D4AF37\n• Roxo Primário: #7311D4\n• Off-White Seda: #F7F6F8\n• Cinza Platina: #E4E4E7',
+    tags: ['Paletas', 'Cores', 'Branding Kit']
   },
   {
     id: '6',
     category: 'roteiros',
-    title: 'Roteiro Rápido para Reels de Tutorial (30s)',
-    description: 'Estrutura dinâmica para vídeos curtos mostrando um recurso do Canva.',
-    copyableContent: '[0-3s Gancho]: "Você sabia que o Canva faz ISSO automaticamente?"\n[3-15s Demonstração]: Mostre a tela usando a ferramenta de IA (ex: Magic Edit ou Remoção Mágica).\n[15-25s Resultado]: Mostre o antes e depois surpreendente.\n[25-30s CTA]: "Comenta \'CANVA\' que eu te mando mais dicas no direct!"',
-    tags: ['Reels', 'TikTok', 'Tutorial']
-  },
-  {
-    id: '7',
-    category: 'prompts',
-    title: 'Texturas Abstratas & Fundos Holográficos',
-    description: 'Elementos visuais de fundo para dar profundidade aos seus designs e carrosséis.',
-    copyableContent: 'Fundo abstrato 3D com ondas fluidas e gradiente suave roxo profundo e dourado, acabamento de vidro fosco glassmorphism, iluminação suave volumétrica, estética futurista e elegante, papel de parede minimalista.',
-    tags: ['Texturas', 'Backgrounds', '3D']
+    title: 'Roteiro de Reel: 3 Truques Secretos do Canva',
+    description: 'Roteiro dinâmico de 30 segundos para vídeo curto de alto compartilhamento.',
+    copyableContent: '[0-3s Gancho]: "Você usa o Canva todo dia e ainda não conhece esses 3 segredos com Inteligência Artificial?"\n[4-12s Dica 1]: "1. Magic Grab: Selecione e mova qualquer elemento de uma foto pronta."\n[13-20s Dica 2]: "2. Magic Expand: Aumente o fundo de qualquer foto em 1 clique sem esticar."\n[21-26s Dica 3]: "3. Tradutor Instantâneo: Traduza todo o seu design para qualquer idioma."\n[27-30s CTA]: "Qual dessas você já usou? Comenta aqui embaixo!"',
+    tags: ['Reels', 'Roteiro', 'Vídeo Rápido']
   }
 ];
 
+const CATEGORIES = [
+  { id: 'all', label: 'Todos', icon: Sparkles },
+  { id: 'prompts', label: 'Prompts IA', icon: Wand2 },
+  { id: 'carrossel', label: 'Carrosséis', icon: Layers },
+  { id: 'ganchos', label: 'Ganchos & Headlines', icon: Flame },
+  { id: 'paletas', label: 'Paletas & Cores', icon: Palette },
+  { id: 'roteiros', label: 'Roteiros de Vídeo', icon: MessageSquare },
+];
+
 export default function DicasPage() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
+  const [selectedCategory, setSelectedCategory] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('todas');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -97,16 +102,15 @@ export default function DicasPage() {
     checkAuth();
   }, []);
 
-  const copyToClipboard = (text: string, id: string) => {
+  const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
   const filteredTips = CONTENT_TIPS.filter(tip => {
-    const matchesCategory = selectedCategory === 'todas' || tip.category === selectedCategory;
-    const matchesSearch = searchTerm === '' || 
-      tip.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const matchesCategory = selectedCategory === 'all' || tip.category === selectedCategory;
+    const matchesSearch = tip.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
       tip.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
       tip.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
     
@@ -115,7 +119,9 @@ export default function DicasPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-background-dark flex items-center justify-center">
+      <main className={`min-h-screen flex items-center justify-center ${
+        isDark ? 'bg-[#000000]' : 'bg-[#f7f6f8]'
+      }`}>
         <motion.div 
           animate={{ rotate: 360 }}
           transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
@@ -126,7 +132,9 @@ export default function DicasPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background-dark flex flex-col relative pb-24">
+    <main className={`min-h-screen flex flex-col relative pb-24 transition-colors duration-200 ${
+      isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'
+    }`}>
       <Header />
       
       <div className="max-w-4xl mx-auto w-full px-4 py-8 space-y-8">
@@ -137,112 +145,122 @@ export default function DicasPage() {
               <Lightbulb className="size-6 text-accent-gold" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-slate-100 font-display">Dicas de Conteúdo & Prompts</h1>
-              <p className="text-xs text-slate-400">Ideias, fórmulas de carrossel e comandos prontos para Canva com IA</p>
+              <h1 className={`text-2xl font-bold font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                Dicas de Conteúdo & Prompts
+              </h1>
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                Recursos prontos para copiar e acelerar sua criação no Canva com IA
+              </p>
             </div>
           </div>
         </div>
 
-        {/* Search Bar & Category Filters */}
+        {/* Search and Category Filters */}
         <div className="space-y-4">
           <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-500" />
-            <input
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
+            <input 
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar por palavras-chave (ex: produto, carrossel, cores, ganchos)..."
-              className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-11 pr-4 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-primary/50 transition-colors"
+              placeholder="Buscar por palavras-chave, tags ou ferramentas..."
+              className={`w-full pl-11 pr-4 py-3 rounded-2xl text-sm border outline-none transition-all ${
+                isDark 
+                  ? 'bg-white/5 border-white/10 text-slate-200 placeholder:text-slate-500 focus:border-primary' 
+                  : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400 shadow-sm focus:border-primary'
+              }`}
             />
           </div>
 
-          {/* Filter Pills */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
-            {[
-              { id: 'todas', label: 'Todas as Dicas' },
-              { id: 'prompts', label: 'Prompts de IA' },
-              { id: 'carrossel', label: 'Ideias de Carrossel' },
-              { id: 'ganchos', label: 'Ganchos & Títulos' },
-              { id: 'paletas', label: 'Paletas de Cores' },
-              { id: 'roteiros', label: 'Roteiros de Vídeo' },
-            ].map(cat => (
-              <button
-                key={cat.id}
-                onClick={() => setSelectedCategory(cat.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all whitespace-nowrap ${
-                  selectedCategory === cat.id
-                    ? 'bg-primary text-white shadow-md shadow-primary/20'
-                    : 'bg-white/5 border border-white/10 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {cat.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+            {CATEGORIES.map(cat => {
+              const Icon = cat.icon;
+              const isSelected = selectedCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-primary text-white shadow-md shadow-primary/20'
+                      : isDark
+                        ? 'bg-white/5 border border-white/10 text-slate-400 hover:text-slate-200 hover:bg-white/10'
+                        : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 shadow-sm'
+                  }`}
+                >
+                  <Icon className="size-3.5" />
+                  {cat.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Tips Grid */}
+        {/* Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredTips.map((tip) => (
             <motion.div
               key={tip.id}
-              initial={{ opacity: 0, y: 12 }}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-white/5 border border-white/10 rounded-3xl p-6 flex flex-col justify-between hover:border-primary/40 hover:bg-white/[0.07] transition-all group"
+              className={`rounded-3xl border p-6 flex flex-col justify-between group transition-all ${
+                isDark 
+                  ? 'bg-white/5 border-white/10 hover:border-primary/40' 
+                  : 'bg-white border-slate-200 shadow-sm hover:shadow-md hover:border-primary/40'
+              }`}
             >
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-primary/20 text-primary border border-primary/30">
-                    {tip.category === 'prompts' ? 'Prompt IA' : tip.category === 'carrossel' ? 'Carrossel' : tip.category === 'ganchos' ? 'Gancho' : tip.category === 'paletas' ? 'Design' : 'Roteiro'}
-                  </span>
-                  
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <Sparkles className="size-3.5 text-accent-gold" />
-                    <span>Pronto para usar</span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {tip.tags.map((tag, i) => (
+                      <span key={i} className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 uppercase tracking-wider">
+                        {tag}
+                      </span>
+                    ))}
                   </div>
                 </div>
 
-                <h3 className="text-base font-bold text-slate-100 font-display">
+                <h3 className={`text-base font-bold font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
                   {tip.title}
                 </h3>
-
-                <p className="text-xs text-slate-400 leading-relaxed">
+                
+                <p className={`text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                   {tip.description}
                 </p>
 
-                {/* Copyable Box */}
-                <div className="relative bg-black/40 border border-white/5 rounded-2xl p-4 mt-3">
-                  <pre className="text-xs text-slate-300 font-sans whitespace-pre-wrap leading-relaxed max-h-36 overflow-y-auto pr-8">
-                    {tip.copyableContent}
-                  </pre>
-                  
-                  <button
-                    onClick={() => copyToClipboard(tip.copyableContent, tip.id)}
-                    className="absolute top-3 right-3 p-2 rounded-xl bg-white/10 text-slate-300 hover:text-white hover:bg-primary transition-all flex items-center gap-1.5 text-[11px] font-medium"
-                    title="Copiar texto"
-                  >
-                    {copiedId === tip.id ? (
-                      <>
-                        <Check className="size-3.5 text-emerald-400" />
-                        <span className="text-emerald-400 font-bold">Copiado</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="size-3.5" />
-                        <span>Copiar</span>
-                      </>
-                    )}
-                  </button>
+                <div className={`relative rounded-2xl p-4 border mt-3 font-mono text-xs whitespace-pre-line leading-relaxed ${
+                  isDark 
+                    ? 'bg-black/40 border-white/5 text-slate-300' 
+                    : 'bg-slate-50 border-slate-200 text-slate-800'
+                }`}>
+                  {tip.copyableContent}
                 </div>
               </div>
 
-              {/* Tags footer */}
-              <div className="flex flex-wrap items-center gap-1.5 pt-4 mt-2 border-t border-white/5">
-                {tip.tags.map((tag, tIdx) => (
-                  <span key={tIdx} className="text-[10px] text-slate-500 bg-white/5 px-2 py-0.5 rounded-md">
-                    #{tag}
-                  </span>
-                ))}
+              <div className={`mt-5 pt-4 border-t flex items-center justify-between ${
+                isDark ? 'border-white/5' : 'border-slate-100'
+              }`}>
+                <span className="text-[11px] text-slate-400">Pronto para usar no Canva</span>
+                <button
+                  onClick={() => handleCopy(tip.id, tip.copyableContent)}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    copiedId === tip.id
+                      ? 'bg-emerald-500 text-white'
+                      : 'bg-primary hover:bg-primary/90 text-white shadow-md shadow-primary/20'
+                  }`}
+                >
+                  {copiedId === tip.id ? (
+                    <>
+                      <Check className="size-3.5" />
+                      Copiado!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="size-3.5" />
+                      Copiar Conteúdo
+                    </>
+                  )}
+                </button>
               </div>
             </motion.div>
           ))}

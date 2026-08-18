@@ -13,6 +13,7 @@ import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { updateUserGamification } from '@/lib/gamification';
+import { useTheme } from '@/lib/ThemeContext';
 
 interface Journey {
   id: string;
@@ -42,6 +43,9 @@ interface DiaryEntry {
 }
 
 export default function JornadaPage() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [diaryEntries, setDiaryEntries] = useState<DiaryEntry[]>([]);
   const [completedItems, setCompletedItems] = useState<Set<string>>(new Set());
@@ -98,55 +102,56 @@ export default function JornadaPage() {
             .eq('completed', true);
           
           const completedIds = new Set(progress?.map(p => p.lesson_id) || []);
-          const firstUncompleted = challengesData.find(c => !completedIds.has(c.id)) || challengesData[0];
+          setCompletedItems(completedIds);
+
+          const firstUncompleted = challengesData.find(c => !completedIds.has(c.id));
           if (firstUncompleted) {
             setSelectedChallengeId(firstUncompleted.id);
+          } else if (challengesData.length > 0) {
+            setSelectedChallengeId(challengesData[0].id);
           }
         }
 
-        // Fetch progress
-        const { data: progressData } = await supabase
-          .from('lesson_progress')
-          .select('lesson_id')
-          .eq('user_id', authUser.id)
-          .eq('completed', true);
-        
-        if (isMounted && progressData) {
-          setCompletedItems(new Set(progressData.map(p => p.lesson_id)));
-        }
-
-        // Fetch diary entries
-        const { data: entries, error: entriesError } = await supabase
+        // Fetch Diary Entries
+        const { data: diaryData, error: diaryError } = await supabase
           .from('diary_entries')
-          .select('*')
+          .select('id, content, mood, created_at')
           .eq('user_id', authUser.id)
-          .order('created_at', { ascending: false })
-          .limit(50);
+          .order('created_at', { ascending: false });
 
-        if (isMounted && entries && !entriesError) {
-          setDiaryEntries(entries);
+        if (isMounted && diaryData && !diaryError) {
+          setDiaryEntries(diaryData);
         }
       } catch (err) {
-        console.error('Error fetching data:', err);
+        console.error('Error fetching jornada data:', err);
       } finally {
         if (isMounted) setLoading(false);
       }
     }
+
     checkAuthAndFetchData();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
-        window.location.href = '/login';
-      }
-    });
+    // Setup realtime subscription for diary entries
+    const diarySubscription = supabase
+      .channel('public:diary_entries')
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'diary_entries' 
+      }, (payload) => {
+        if (payload.new && payload.new.user_id === user?.id) {
+          setDiaryEntries(prev => [payload.new as DiaryEntry, ...prev]);
+        }
+      })
+      .subscribe();
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
+      supabase.removeChannel(diarySubscription);
     };
-  }, []);
+  }, [user?.id]);
 
-  const toggleItemCompletion = async (itemId: string, e: React.MouseEvent) => {
+  const handleToggleComplete = async (e: React.MouseEvent, itemId: string) => {
     e.stopPropagation();
     if (!user) return;
 
@@ -194,7 +199,7 @@ export default function JornadaPage() {
   };
 
   const isUnlocked = (index: number) => {
-    return true; // All challenges are unlocked per user request to remove check-in system
+    return true; // All challenges are unlocked
   };
 
   const groupDiaryByDay = () => {
@@ -209,7 +214,9 @@ export default function JornadaPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-background-dark flex items-center justify-center">
+      <main className={`min-h-screen flex items-center justify-center ${
+        isDark ? 'bg-[#000000]' : 'bg-[#f7f6f8]'
+      }`}>
         <motion.div 
           animate={{ rotate: 360 }}
           transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
@@ -220,7 +227,9 @@ export default function JornadaPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background-dark relative pb-24">
+    <main className={`min-h-screen relative pb-24 transition-colors duration-200 ${
+      isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'
+    }`}>
       <Header />
       
       <div className="max-w-5xl mx-auto px-4 py-8">
@@ -249,11 +258,11 @@ export default function JornadaPage() {
                         key={currentChallenge.id}
                         initial={{ y: 20, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
-                        className={`group relative bg-white/5 border rounded-3xl overflow-hidden transition-all ${
+                        className={`group relative border rounded-3xl overflow-hidden transition-all ${
                           completedItems.has(currentChallenge.id) 
                             ? 'border-emerald-500/30 bg-emerald-500/5' 
                             : unlocked 
-                              ? 'border-white/10 hover:border-primary/50'
+                              ? isDark ? 'bg-white/5 border-white/10 hover:border-primary/50' : 'bg-white border-slate-200 shadow-md hover:border-primary/50'
                               : 'border-white/5 opacity-50 grayscale'
                         }`}
                       >
@@ -262,17 +271,18 @@ export default function JornadaPage() {
                             src={getDirectDriveLink(currentChallenge.thumbnail_url) || `https://picsum.photos/seed/${currentChallenge.id}/800/600`}
                             alt={currentChallenge.title}
                             fill
-                            className="object-cover opacity-60 group-hover:scale-105 transition-transform duration-500"
+                            className="object-cover opacity-80 group-hover:scale-105 transition-transform duration-500"
                             referrerPolicy="no-referrer"
+                            unoptimized
                           />
-                          <div className="absolute inset-0 bg-gradient-to-t from-background-dark via-transparent to-transparent" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
                           
                           {currentChallenge.media_url && (
                             <div className="absolute inset-0 flex items-center justify-center">
                               <button 
                                 onClick={() => unlocked && setActiveVideo(currentChallenge)}
                                 disabled={!unlocked}
-                                className={`size-20 rounded-full flex items-center justify-center shadow-2xl transform transition-transform ${
+                                className={`size-20 rounded-full flex items-center justify-center shadow-2xl transform transition-transform cursor-pointer ${
                                   !unlocked 
                                     ? 'bg-slate-800 cursor-not-allowed' 
                                     : 'group-hover:scale-110 ' + (completedItems.has(currentChallenge.id) ? 'bg-emerald-500' : 'bg-primary')
@@ -288,8 +298,6 @@ export default function JornadaPage() {
                               </button>
                             </div>
                           )}
-
-                          {/* Check-in button removed per user request */}
                         </div>
 
                         <div className="p-8">
@@ -303,8 +311,14 @@ export default function JornadaPage() {
                               </span>
                             )}
                           </div>
-                          <h3 className="text-3xl font-bold text-slate-100 mb-3 font-display">{currentChallenge.title}</h3>
-                          <p className="text-base text-slate-400 leading-relaxed">
+                          <h3 className={`text-3xl font-bold mb-3 font-display ${
+                            isDark ? 'text-slate-100' : 'text-slate-900'
+                          }`}>
+                            {currentChallenge.title}
+                          </h3>
+                          <p className={`text-base leading-relaxed ${
+                            isDark ? 'text-slate-400' : 'text-slate-600'
+                          }`}>
                             {currentChallenge.description}
                           </p>
                         </div>
@@ -322,7 +336,7 @@ export default function JornadaPage() {
                 if (otherChallenges.length === 0) return null;
 
                 return (
-                  <div className="space-y-6 pt-12 border-t border-white/5">
+                  <div className={`space-y-6 pt-12 border-t ${isDark ? 'border-white/5' : 'border-slate-200'}`}>
                     <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">Próximos Passos</h2>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                       {otherChallenges.map((challenge, index) => {
@@ -336,11 +350,11 @@ export default function JornadaPage() {
                             viewport={{ once: true }}
                             transition={{ delay: index * 0.1 }}
                             onClick={() => unlocked && setSelectedChallengeId(challenge.id)}
-                            className={`group relative bg-white/5 border rounded-3xl overflow-hidden transition-all cursor-pointer ${
+                            className={`group relative border rounded-3xl overflow-hidden transition-all cursor-pointer ${
                               completedItems.has(challenge.id) 
                                 ? 'border-emerald-500/30 bg-emerald-500/5' 
                                 : unlocked 
-                                  ? 'border-white/10 hover:border-primary/50'
+                                  ? isDark ? 'bg-white/5 border-white/10 hover:border-primary/50' : 'bg-white border-slate-200 shadow-sm hover:shadow-md hover:border-primary/50'
                                   : 'border-white/5 opacity-50 grayscale cursor-not-allowed'
                             }`}
                           >
@@ -349,10 +363,11 @@ export default function JornadaPage() {
                                 src={getDirectDriveLink(challenge.thumbnail_url) || `https://picsum.photos/seed/${challenge.id}/600/400`}
                                 alt={challenge.title}
                                 fill
-                                className="object-cover opacity-60 group-hover:scale-105 transition-transform duration-500"
+                                className="object-cover opacity-80 group-hover:scale-105 transition-transform duration-500"
                                 referrerPolicy="no-referrer"
+                                unoptimized
                               />
-                              <div className="absolute inset-0 bg-gradient-to-t from-background-dark via-transparent to-transparent" />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
                               
                               {challenge.media_url && (
                                 <div className="absolute inset-0 flex items-center justify-center">
@@ -362,7 +377,7 @@ export default function JornadaPage() {
                                       unlocked && setActiveVideo(challenge);
                                     }}
                                     disabled={!unlocked}
-                                    className={`size-14 rounded-full flex items-center justify-center shadow-2xl transform transition-transform ${
+                                    className={`size-12 rounded-full flex items-center justify-center shadow-xl transform transition-transform cursor-pointer ${
                                       !unlocked 
                                         ? 'bg-slate-800 cursor-not-allowed' 
                                         : 'group-hover:scale-110 ' + (completedItems.has(challenge.id) ? 'bg-emerald-500' : 'bg-primary')
@@ -371,122 +386,46 @@ export default function JornadaPage() {
                                     {completedItems.has(challenge.id) ? (
                                       <CheckCircle2 className="size-6 text-white" />
                                     ) : unlocked ? (
-                                      <Play className="size-6 fill-current ml-1 text-white" />
+                                      <Play className="size-6 fill-current ml-0.5 text-white" />
                                     ) : (
                                       <Clock className="size-6 text-slate-500" />
                                     )}
                                   </button>
                                 </div>
                               )}
-
-                              {/* Check-in button removed per user request */}
-
-                              {!unlocked && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
-                                  <div className="flex flex-col items-center gap-2">
-                                    <Clock className="size-8 text-white/40" />
-                                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Bloqueado</span>
-                                  </div>
-                                </div>
-                              )}
                             </div>
 
-                            <div className="p-5">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h3 className={`text-xl font-bold font-display ${
-                                  completedItems.has(challenge.id) ? 'text-slate-300' : unlocked ? 'text-slate-100' : 'text-slate-500'
-                                }`}>{challenge.title}</h3>
-                                {completedItems.has(challenge.id) && (
-                                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 text-[8px] font-bold uppercase tracking-widest">
-                                    Concluído
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-sm text-slate-400 mb-4 line-clamp-2 leading-relaxed">
+                            <div className="p-6">
+                              <h4 className={`text-xl font-bold mb-2 font-display ${
+                                isDark ? 'text-slate-100' : 'text-slate-900'
+                              }`}>
+                                {challenge.title}
+                              </h4>
+                              <p className={`text-sm line-clamp-2 ${
+                                isDark ? 'text-slate-400' : 'text-slate-600'
+                              }`}>
                                 {challenge.description}
                               </p>
-
-                              {challenge.url && unlocked && (
-                                <div className="pt-4 border-t border-white/5">
-                                  <a 
-                                    href={challenge.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="inline-flex items-center gap-2 text-xs font-bold text-primary hover:text-primary/80 transition-colors uppercase tracking-widest"
-                                  >
-                                    <FileText className="size-4" />
-                                    Material de Apoio
-                                  </a>
-                                </div>
-                              )}
                             </div>
                           </motion.div>
-                        )
+                        );
                       })}
                     </div>
                   </div>
-                )
+                );
               })()}
             </div>
-
-            {/* Sidebar Column */}
-            <div className="lg:col-span-4 space-y-8">
-              <div className="sticky top-24 space-y-8">
-                {/* Evolution Diary Section */}
-                <div className="space-y-8">
-                  <EvolutionDiary />
-                  
-                  {diaryEntries.length > 0 && (
-                    <div className="mt-8">
-                      <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-2">
-                        <Calendar className="size-4" />
-                        Resumo de Experiências
-                      </h2>
-                      <div className="space-y-6">
-                        {groupDiaryByDay().map(([date, entries]) => (
-                          <motion.div 
-                            key={date}
-                            initial={{ opacity: 0, y: 10 }}
-                            whileInView={{ opacity: 1, y: 0 }}
-                            viewport={{ once: true }}
-                            className="relative pl-6 border-l border-primary/20"
-                          >
-                            <div className="absolute left-[-5px] top-0 size-2.5 rounded-full bg-primary shadow-[0_0_10px_rgba(var(--primary-rgb),0.5)]" />
-                            <h3 className="text-[10px] font-bold text-primary uppercase tracking-widest mb-3">
-                              {format(new Date(date + 'T12:00:00'), "dd 'de' MMMM", { locale: ptBR })}
-                            </h3>
-                            <div className="space-y-3">
-                              {entries.map((entry) => (
-                                <div key={entry.id} className="p-4 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors">
-                                  <p className="text-sm text-slate-300 leading-relaxed italic">
-                                    &quot;{entry.content}&quot;
-                                  </p>
-                                  <div className="mt-2 flex items-center gap-2">
-                                    <span className="text-[10px] text-slate-500">
-                                      {format(new Date(entry.created_at), 'HH:mm')}
-                                    </span>
-                                    {entry.mood && (
-                                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                                        {entry.mood}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </motion.div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+            
+            {/* Sidebar Column on Desktop */}
+            <div className="lg:col-span-4 space-y-6">
+              <div className="sticky top-24 space-y-6">
+                <EvolutionDiary />
               </div>
             </div>
           </div>
         )}
       </div>
-
+      
       <BottomNav />
 
       {/* Video Modal */}
@@ -503,39 +442,18 @@ export default function JornadaPage() {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-4xl bg-[#1a1225] rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col"
+              className="relative w-full max-w-4xl aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="aspect-video w-full bg-black">
-                <iframe
-                  src={getEmbedVideoUrl(activeVideo.media_url!) || ''}
-                  className="w-full h-full border-0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                />
-              </div>
-
-              {activeVideo.url && (
-                <div className="p-6 bg-white/5 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="flex flex-col gap-1 text-center sm:text-left">
-                    <span className="text-[10px] font-bold text-primary uppercase tracking-widest">Material Complementar</span>
-                    <h4 className="text-base font-bold text-slate-100 font-display">{activeVideo.title}</h4>
-                  </div>
-                  <a 
-                    href={activeVideo.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full sm:w-auto flex items-center justify-center gap-2 bg-primary text-white px-8 py-4 rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-primary/80 transition-all shadow-xl shadow-primary/20"
-                  >
-                    <FileText className="size-4" />
-                    Acessar Material de Apoio
-                  </a>
-                </div>
-              )}
-
+              <iframe
+                src={getEmbedVideoUrl(activeVideo.media_url || activeVideo.url) || ''}
+                className="w-full h-full border-0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+              />
               <button
                 onClick={() => setActiveVideo(null)}
-                className="absolute top-4 right-4 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors z-10"
+                className="absolute top-4 right-4 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors"
               >
                 <X className="size-6" />
               </button>

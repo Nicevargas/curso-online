@@ -4,12 +4,21 @@ import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Send, Sparkles, User, Bot, Lightbulb, Copy, Check, Palette, BookOpen, Layers, Wand2 } from 'lucide-react';
+import { Send, Sparkles, User, Bot, Lightbulb, Copy, Check, Palette, BookOpen, Layers, Wand2, ExternalLink, FileText } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useTheme } from '@/lib/ThemeContext';
+
+interface Fonte {
+  numero: number;
+  nome: string;
+  link: string | null;
+  similaridade: number;
+}
 
 interface Message {
   role: 'user' | 'model';
   text: string;
+  fontes?: Fonte[];
 }
 
 const QUICK_PROMPTS = [
@@ -36,6 +45,9 @@ const QUICK_PROMPTS = [
 ];
 
 export default function ConsultoraPage() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'model',
@@ -61,45 +73,55 @@ export default function ConsultoraPage() {
   }, []);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  const handleSend = async (customText?: string) => {
-    const messageToSend = customText || input.trim();
-    if (!messageToSend || isTyping) return;
+  const handleSendMessage = async (textToSend?: string) => {
+    const messageContent = textToSend || input;
+    if (!messageContent.trim()) return;
 
-    if (!customText) setInput('');
-
-    const newMessages = [...messages, { role: 'user' as const, text: messageToSend }];
-    setMessages(newMessages);
+    const userMessage: Message = { role: 'user', text: messageContent };
+    setMessages(prev => [...prev, userMessage]);
+    if (!textToSend) setInput('');
     setIsTyping(true);
 
     try {
-      const response = await fetch('/api/consultora', {
+      const response = await fetch('/api/consultor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages }),
+        body: JSON.stringify({
+          pergunta: messageContent,
+          messages: [...messages, userMessage].map(m => ({
+            role: m.role,
+            content: m.text
+          }))
+        })
       });
 
       if (!response.ok) {
-        throw new Error('Falha na resposta do servidor');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Falha ao obter resposta da consultora');
       }
 
       const data = await response.json();
-      const replyText = data.text || "Desculpe, não consegui obter uma resposta. Tente novamente.";
-      
-      setMessages(prev => [...prev, { role: 'model', text: replyText }]);
-    } catch (error) {
-      console.error('Erro na consulta:', error);
+      const modelMessage: Message = {
+        role: 'model',
+        text: data.resposta || data.text || 'Desculpe, não consegui obter a resposta no momento.',
+        fontes: Array.isArray(data.fontes) ? data.fontes : undefined
+      };
+
+      setMessages(prev => [...prev, modelMessage]);
+    } catch (err: any) {
+      console.error('Error in chat:', err);
       setMessages(prev => [
         ...prev,
         {
           role: 'model',
-          text: "Houve uma instabilidade temporária na conexão. Por favor, tente enviar sua pergunta novamente!"
+          text: err.message ? `Erro na consultoria: ${err.message}` : 'Houve uma falha na conexão com a consultoria. Por favor, tente novamente em alguns instantes.'
         }
       ]);
     } finally {
@@ -115,7 +137,9 @@ export default function ConsultoraPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-background-dark flex items-center justify-center">
+      <main className={`min-h-screen flex items-center justify-center ${
+        isDark ? 'bg-[#000000]' : 'bg-[#f7f6f8]'
+      }`}>
         <motion.div 
           animate={{ rotate: 360 }}
           transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
@@ -126,20 +150,28 @@ export default function ConsultoraPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background-dark flex flex-col relative pb-20">
+    <main className={`min-h-screen flex flex-col relative pb-20 transition-colors duration-200 ${
+      isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'
+    }`}>
       <Header />
       
       {/* Header Info */}
-      <div className="bg-background-dark/80 backdrop-blur-md border-b border-white/5 p-4 flex items-center justify-between sticky top-[69px] z-40">
+      <div className={`p-4 flex items-center justify-between sticky top-[69px] z-40 backdrop-blur-md border-b ${
+        isDark ? 'bg-black/80 border-white/5' : 'bg-white/80 border-slate-200 shadow-sm'
+      }`}>
         <div className="flex items-center gap-3">
           <div className="size-10 rounded-2xl bg-gradient-to-tr from-primary to-accent-gold/50 flex items-center justify-center border border-primary/40 shadow-lg shadow-primary/20">
             <Sparkles className="size-5 text-white" />
           </div>
           <div>
-            <h1 className="text-sm font-bold text-slate-100 font-display">Conselheira & Consultora de IA</h1>
+            <h1 className={`text-sm font-bold font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+              Conselheira & Consultora de IA
+            </h1>
             <div className="flex items-center gap-1.5">
               <div className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[10px] text-slate-400 font-medium">Especialista Canva com IA Ativa</span>
+              <span className={`text-[10px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Especialista Canva com IA Ativa
+              </span>
             </div>
           </div>
         </div>
@@ -158,102 +190,173 @@ export default function ConsultoraPage() {
               {QUICK_PROMPTS.map((item, idx) => (
                 <button
                   key={idx}
-                  onClick={() => handleSend(item.query)}
-                  className="flex items-center gap-3 p-3.5 rounded-2xl bg-white/5 border border-white/10 hover:border-primary/50 hover:bg-primary/10 transition-all text-left group"
+                  onClick={() => handleSendMessage(item.query)}
+                  className={`p-3 rounded-2xl border text-left flex items-start gap-3 transition-all cursor-pointer ${
+                    isDark 
+                      ? 'bg-white/5 border-white/10 hover:border-primary/50 hover:bg-white/10' 
+                      : 'bg-white border-slate-200 shadow-sm hover:border-primary/50 hover:bg-slate-50'
+                  }`}
                 >
-                  <div className="size-8 rounded-xl bg-primary/20 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                  <div className="size-8 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
                     <item.icon className="size-4 text-primary" />
                   </div>
-                  <span className="text-xs font-semibold text-slate-200 group-hover:text-white transition-colors">
-                    {item.label}
-                  </span>
+                  <div>
+                    <p className={`text-xs font-bold ${isDark ? 'text-slate-200' : 'text-slate-900'}`}>{item.label}</p>
+                    <p className="text-[10px] text-slate-400 line-clamp-1 mt-0.5">{item.query}</p>
+                  </div>
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {messages.map((msg, index) => (
+        {messages.map((message, index) => (
           <motion.div
             key={index}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
-            <div className={`flex gap-3 max-w-[90%] sm:max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-              <div className={`size-8 rounded-full flex items-center justify-center shrink-0 border ${
-                msg.role === 'user' 
-                  ? 'bg-white/10 border-white/20' 
-                  : 'bg-primary/20 border-primary/30'
-              }`}>
-                {msg.role === 'user' ? <User className="size-4 text-slate-300" /> : <Bot className="size-4 text-primary" />}
+            {message.role === 'model' && (
+              <div className="size-8 rounded-full bg-gradient-to-tr from-primary to-accent-gold flex items-center justify-center shrink-0 shadow-md">
+                <Bot className="size-4 text-white" />
               </div>
-              <div className="relative group">
-                <div className={`p-4 sm:p-5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
-                  msg.role === 'user'
-                    ? 'bg-primary text-white rounded-tr-none'
-                    : 'bg-white/5 text-slate-200 border border-white/10 rounded-tl-none shadow-md'
+            )}
+
+            <div className={`relative max-w-[85%] rounded-3xl p-4 sm:p-5 text-sm leading-relaxed shadow-sm ${
+              message.role === 'user'
+                ? 'bg-primary text-white rounded-br-none'
+                : isDark
+                  ? 'bg-[#18151f] border border-white/10 text-slate-200 rounded-bl-none'
+                  : 'bg-white border border-slate-200 text-slate-900 rounded-bl-none shadow-sm'
+            }`}>
+              <div className="whitespace-pre-wrap font-sans">
+                {message.text}
+              </div>
+
+              {/* Cited Sources from RAG Knowledge Base */}
+              {message.role === 'model' && message.fontes && message.fontes.length > 0 && (
+                <div className={`mt-3 pt-3 border-t ${
+                  isDark ? 'border-white/10' : 'border-slate-200'
                 }`}>
-                  {msg.text}
+                  <div className="flex items-center gap-1.5 mb-2 text-[11px] font-bold text-accent-gold uppercase tracking-wider">
+                    <FileText className="size-3.5" />
+                    Fontes do Material do Workshop:
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {message.fontes.map((fonte) => (
+                      <div
+                        key={fonte.numero}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs border ${
+                          isDark 
+                            ? 'bg-white/5 border-white/10 text-slate-300' 
+                            : 'bg-slate-100 border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        <span className="font-bold text-primary">[{fonte.numero}]</span>
+                        <span className="truncate max-w-[180px]">{fonte.nome}</span>
+                        {fonte.link && (
+                          <a
+                            href={fonte.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:text-accent-gold transition-colors ml-0.5"
+                            title="Abrir documento original"
+                          >
+                            <ExternalLink className="size-3" />
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                {msg.role === 'model' && (
+              )}
+
+              {message.role === 'model' && (
+                <div className={`flex items-center justify-end gap-2 mt-3 pt-2 border-t ${
+                  isDark ? 'border-white/5' : 'border-slate-100'
+                }`}>
                   <button
-                    onClick={() => copyToClipboard(msg.text, index)}
-                    className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/40 text-slate-400 hover:text-white opacity-0 group-hover:opacity-100 transition-all"
-                    title="Copiar resposta"
+                    onClick={() => copyToClipboard(message.text, index)}
+                    className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-200 transition-colors"
                   >
-                    {copiedIndex === index ? <Check className="size-3.5 text-emerald-400" /> : <Copy className="size-3.5" />}
+                    {copiedIndex === index ? (
+                      <>
+                        <Check className="size-3 text-emerald-400" />
+                        <span className="text-emerald-400">Copiado</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="size-3" />
+                        <span>Copiar resposta</span>
+                      </>
+                    )}
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
+
+            {message.role === 'user' && (
+              <div className="size-8 rounded-full bg-slate-700 flex items-center justify-center shrink-0">
+                <User className="size-4 text-white" />
+              </div>
+            )}
           </motion.div>
         ))}
 
         {isTyping && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex justify-start"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex gap-3 items-center"
           >
-            <div className="flex gap-3">
-              <div className="size-8 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center">
-                <Bot className="size-4 text-primary" />
-              </div>
-              <div className="bg-white/5 border border-white/10 p-4 rounded-2xl rounded-tl-none flex items-center gap-1.5">
-                <span className="text-xs text-slate-400 mr-1">Consultando conhecimento...</span>
-                <motion.div animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1 }} className="size-1.5 rounded-full bg-primary" />
-                <motion.div animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1, delay: 0.2 }} className="size-1.5 rounded-full bg-primary" />
-                <motion.div animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1, delay: 0.4 }} className="size-1.5 rounded-full bg-primary" />
-              </div>
+            <div className="size-8 rounded-full bg-gradient-to-tr from-primary to-accent-gold flex items-center justify-center shrink-0 shadow-md">
+              <Bot className="size-4 text-white" />
+            </div>
+            <div className={`rounded-2xl p-4 border flex items-center gap-1.5 ${
+              isDark ? 'bg-[#18151f] border-white/10' : 'bg-white border-slate-200 shadow-sm'
+            }`}>
+              <div className="size-2 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
+              <div className="size-2 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
+              <div className="size-2 rounded-full bg-primary animate-bounce" />
             </div>
           </motion.div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
-      <div className="p-4 sticky bottom-20 z-40 bg-background-dark/90 backdrop-blur-xl border-t border-white/5">
-        <div className="max-w-3xl mx-auto relative">
+      {/* Input Form */}
+      <div className={`p-4 sticky bottom-0 z-40 border-t ${
+        isDark ? 'bg-black/90 border-white/5 backdrop-blur-md' : 'bg-white/90 border-slate-200 backdrop-blur-md'
+      }`}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSendMessage();
+          }}
+          className="max-w-3xl mx-auto flex items-center gap-2"
+        >
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Pergunte sobre prompts, ferramentas do Canva, ideias de post..."
-            className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-5 pr-14 text-sm text-slate-200 focus:outline-none focus:border-primary/50 transition-all placeholder:text-slate-500 shadow-inner"
+            placeholder="Pergunte sobre aulas, ferramentas de IA, prompts ou carrosséis..."
+            disabled={isTyping}
+            className={`flex-1 px-5 py-3.5 rounded-2xl text-sm border outline-none transition-all ${
+              isDark 
+                ? 'bg-white/5 border-white/10 text-slate-100 placeholder:text-slate-500 focus:border-primary' 
+                : 'bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-primary'
+            }`}
           />
           <button
-            onClick={() => handleSend()}
+            type="submit"
             disabled={!input.trim() || isTyping}
-            className="absolute right-2.5 top-2.5 bottom-2.5 px-4 rounded-xl bg-primary text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all hover:bg-primary/80 flex items-center justify-center shadow-md shadow-primary/20"
+            className="size-12 rounded-2xl bg-primary hover:bg-primary/90 text-white flex items-center justify-center transition-all shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed shrink-0 cursor-pointer"
           >
-            <Send className="size-4" />
+            <Send className="size-5" />
           </button>
-        </div>
-        <p className="text-center text-[10px] text-slate-500 mt-2.5 uppercase tracking-wider font-medium">
-          Consultora Especialista treinada nas técnicas e ferramentas do Canva com IA
-        </p>
+        </form>
       </div>
 
       <BottomNav />
