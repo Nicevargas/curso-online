@@ -31,62 +31,47 @@ export default function CadastroPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    setStatus('Iniciando cadastro...');
+    setStatus('Criando sua conta...');
 
     try {
-      // 1. Sign up the user
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: name,
-          }
-        }
+      // 1. First, call our server-side registration API endpoint (auto-confirms & safely creates profile)
+      const res = await fetch('/api/auth/cadastro', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password }),
       });
 
-      if (authError) throw authError;
+      const data = await res.json();
 
-      if (authData.user) {
-        setStatus('Criando seu perfil místico...');
-        console.log('Criando perfil para:', authData.user.id, 'com role: usuario');
-        
-        // 2. Create profile in the profiles table
-        const { error: profileError } = await supabase
-          .from('profiles')
-          .insert([
-            { 
-              id: authData.user.id,
-              name: name,
-              email: email,
-              role: 'usuario', // Garantindo que novos usuários sejam sempre 'usuario'
-              level: 1,
-              status: 'Ativo',
-              points: 0,
-              streak: 0,
-              plan: '7_days_free',
-              journey_id: 'fa512a52-9742-410f-a71b-0bd4013bec8d'
-            }
-          ]);
-
-        if (profileError) {
-          console.error('Erro ao criar perfil:', profileError);
+      if (!res.ok) {
+        // If server API reported an error, check if fallback to standard signUp is useful
+        if (data.isDatabaseTriggerError) {
+          throw new Error(data.error);
         }
-
-        // Check if session exists (if not, it might be because email confirmation is required)
-        if (!authData.session) {
-          setError('Conta criada! Por favor, verifique seu e-mail para confirmar o cadastro antes de entrar.');
-          setLoading(false);
-          setStatus(null);
-          return;
-        }
+        throw new Error(data.error || 'Erro ao criar conta.');
       }
 
-      setStatus('Sucesso! Entrando no sistema...');
+      setStatus('Conta criada com sucesso! Autenticando...');
+
+      // 2. Sign in the user immediately
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) {
+        console.warn('Erro no login automático:', signInError);
+        setStatus('Conta criada com sucesso!');
+        router.push('/login?cadastrado=true');
+        return;
+      }
+
+      setStatus('Pronto! Redirecionando...');
       window.location.href = '/';
     } catch (err: any) {
+      console.error('Erro no cadastro:', err);
       if (err.message?.includes('rate limit exceeded')) {
-        setError('Muitas tentativas em pouco tempo. Por favor, aguarde alguns minutos antes de tentar novamente.');
+        setError('Muitas tentativas em pouco tempo. Por favor, aguarde alguns instantes antes de tentar novamente.');
       } else {
         setError(err.message || 'Erro ao criar conta. Tente novamente.');
       }
@@ -124,10 +109,10 @@ export default function CadastroPage() {
             <motion.div 
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
-              className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center gap-3 text-red-400 text-sm"
+              className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-3 text-red-400 text-sm"
             >
-              <AlertCircle className="size-5 shrink-0" />
-              <p>{error}</p>
+              <AlertCircle className="size-5 shrink-0 mt-0.5" />
+              <p className="leading-relaxed">{error}</p>
             </motion.div>
           )}
 
@@ -218,7 +203,7 @@ export default function CadastroPage() {
           </div>
         </form>
 
-     </motion.div>
+      </motion.div>
     </main>
   );
 }
