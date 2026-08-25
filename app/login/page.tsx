@@ -152,9 +152,17 @@ export default function LoginPage() {
             )}
           </button>
 
-          <div className="text-center mt-8">
-            <p className="text-slate-600 text-[10px] mt-4 px-6 italic">
-              * O acesso é restrito a membros. Se você adquiriu seu acesso, utilize o link enviado para o seu e-mail após a confirmação do pagamento.
+          <div className="text-center mt-6 space-y-3">
+            <p className="text-slate-400 text-sm">
+              Não tem uma conta?{' '}
+              <Link href="/cadastro" className="text-primary font-bold hover:underline">
+                Cadastre-se aqui
+              </Link>
+            </p>
+            <p className="text-xs text-slate-500">
+              <Link href="/privacidade" className="hover:text-slate-400 underline underline-offset-2 transition-colors">
+                Política de Privacidade
+              </Link>
             </p>
           </div>
         </form>

@@ -116,7 +116,7 @@ export default function CadastroPage() {
             <MistikaLogo size="xl" />
           </motion.div>
           <h1 className="text-3xl font-bold text-slate-100 font-display mb-2">Crie sua conta</h1>
-          <p className="text-slate-400">Inicie sua jornada mística hoje</p>
+          <p className="text-slate-400">Comece sua jornada no workshop Canva com IA</p>
         </div>
 
         <form onSubmit={handleCadastro} className="space-y-4">
@@ -201,12 +201,19 @@ export default function CadastroPage() {
             )}
           </button>
 
-          <div className="text-center mt-8">
+          <div className="text-center mt-8 space-y-3">
             <p className="text-slate-500 text-sm">
               Já tem uma conta?{' '}
               <Link href="/login" className="text-primary font-bold hover:underline">
                 Entre aqui
               </Link>
+            </p>
+            <p className="text-xs text-slate-500">
+              Ao se cadastrar, você concorda com a nossa{' '}
+              <Link href="/privacidade" className="text-slate-400 hover:text-white underline underline-offset-2 transition-colors">
+                Política de Privacidade
+              </Link>
+              .
             </p>
           </div>
         </form>

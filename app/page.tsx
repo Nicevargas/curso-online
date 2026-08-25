@@ -336,6 +336,16 @@ export default function Page() {
             </div>
           </div>
         </div>
+
+        {/* Footer */}
+        <footer className="mt-16 pt-8 pb-12 border-t border-white/5 text-center text-xs text-slate-500">
+          <div className="flex flex-wrap items-center justify-center gap-4 mb-2">
+            <Link href="/privacidade" className="hover:text-slate-400 underline underline-offset-2 transition-colors">
+              Política de Privacidade
+            </Link>
+          </div>
+          <p>© {new Date().getFullYear()} Workshop Canva com IA. Todos os direitos reservados.</p>
+        </footer>
       </div>
       <BottomNav />
 
