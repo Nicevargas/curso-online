@@ -1,6 +1,6 @@
 {
   "name": "canva com ia - o desafio",
-  "description": "Canva com IA - O Desafio",
+  "description": "Plataforma completa de cursos online, mentorias, desafios práticos e consultoria com inteligência artificial.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

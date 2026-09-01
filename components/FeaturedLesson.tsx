@@ -24,9 +24,10 @@ interface LessonData {
 interface FeaturedLessonProps {
   lesson: LessonData | null;
   loading: boolean;
+  courseTitle?: string;
 }
 
-export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps) {
+export default function FeaturedLesson({ lesson, loading, courseTitle }: FeaturedLessonProps) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
@@ -139,7 +140,12 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
     <section className="px-4 py-6 sm:px-0">
       <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-6">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center flex-wrap gap-2">
+            {courseTitle && (
+              <span className="px-2.5 py-0.5 rounded-full bg-accent-purple/20 text-accent-purple text-[10px] font-extrabold uppercase tracking-widest border border-accent-purple/30 font-mono">
+                {courseTitle}
+              </span>
+            )}
             <span className="px-2 py-0.5 rounded bg-primary/20 text-primary text-[10px] font-bold uppercase tracking-widest border border-primary/10">
               {lesson.categoria === 'Boas-vindas' ? 'Comece por aqui' : (lesson.categoria || 'Aula do Dia')}
             </span>

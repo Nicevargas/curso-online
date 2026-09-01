@@ -193,7 +193,7 @@ export default function SubscriptionGuard({ children }: SubscriptionGuardProps) 
 
           <h2 className="text-2xl font-bold text-slate-100 mb-4 font-display">Seu período de teste expirou</h2>
           <p className="text-slate-400 mb-8">
-            Seu período gratuito do curso Canva com IA - O Desafio chegou ao fim. Para continuar acessando todas as aulas, mentorias, ferramentas e desafios, realize o pagamento da sua assinatura.
+            Seu período gratuito na plataforma chegou ao fim. Para continuar acessando todos os cursos online, mentorias, ferramentas e desafios práticos, realize o pagamento da sua assinatura.
           </p>
 
           <div className="space-y-4">

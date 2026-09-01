@@ -17,8 +17,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'Canva com IA - O Desafio',
-  description: 'Canva com IA - O Desafio',
+  title: 'Portal de Cursos Online · Plataforma de Aprendizado & IA',
+  description: 'Plataforma completa de cursos online, mentorias, desafios práticos e consultoria com inteligência artificial.',
   icons: {
     icon: 'https://curso.curtatche.com.br/icone_coaet.png',
   },
