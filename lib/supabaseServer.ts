@@ -25,8 +25,8 @@ function getEnvVal(possibleNames: string[]): string | undefined {
 // Server-only Supabase client with Service Role key (for KB indexing, admin auth, and RAG queries)
 export function getSupabaseAdmin() {
   const supabaseUrl = getEnvVal([
-    'NEXT_PUBLIC_SUPABASE_URL',
     'SUPABASE_URL',
+    'NEXT_PUBLIC_SUPABASE_URL',
     'NEXT_PUBLIC_SUPABASE_URL_KEY',
     'SUPABASE_PROJECT_URL',
   ]);
@@ -42,7 +42,7 @@ export function getSupabaseAdmin() {
   ]);
 
   if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error('Supabase URL ou SUPABASE_SERVICE_ROLE_KEY não configurados no servidor.');
+    throw new Error('SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configurados no servidor.');
   }
 
   return createClient(supabaseUrl, serviceRoleKey, {
@@ -56,20 +56,20 @@ export function getSupabaseAdmin() {
 // Client for server-side read/write using anon key when service role is not available
 export function getSupabaseServerClient() {
   const supabaseUrl = getEnvVal([
-    'NEXT_PUBLIC_SUPABASE_URL',
     'SUPABASE_URL',
+    'NEXT_PUBLIC_SUPABASE_URL',
     'SUPABASE_PROJECT_URL',
   ]);
 
   const anonKey = getEnvVal([
-    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
     'SUPABASE_ANON_KEY',
+    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
     'SUPABASE_KEY',
     'ANON_KEY',
   ]);
 
   if (!supabaseUrl || !anonKey) {
-    throw new Error('Supabase URL ou NEXT_PUBLIC_SUPABASE_ANON_KEY não configurados no servidor.');
+    throw new Error('SUPABASE_URL ou SUPABASE_ANON_KEY não configurados no servidor.');
   }
 
   return createClient(supabaseUrl, anonKey, {
