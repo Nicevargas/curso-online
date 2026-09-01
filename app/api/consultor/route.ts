@@ -1,8 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 import { getSupabaseAdmin } from '@/lib/supabaseServer';
 
 export const runtime = 'nodejs';
+
+const SYSTEM_INSTRUCTION = `Você é a Conselheira e Consultora Especialista do curso "Canva com IA 2.0 - O Desafio".
+Sua missão é ser a mentora prática, conselheira criativa e estrategista de design e inteligência artificial para os alunos.
+
+Suas especialidades fundamentais:
+1. **Ferramentas de IA do Canva**: Magic Media (geração de imagens e vídeos), Magic Edit (substituição mágica de elementos), Magic Expand (expansão generativa de cenários), Removedor de Fundo, Redimensionamento Mágico (Magic Switch), Estilos & Paletas, Camadas, Brand Kit e Mockups.
+2. **Engenharia de Prompts para o Canva**: Como estruturar comandos profissionais com (sujeito, estilo, iluminação, composição, ângulo de câmera, cores e atmosfera) para imagens realistas, ilustrações 3D, retratos corporativos e texturas.
+3. **Criação de Carrosséis e Posts Magnéticos**: Estruturas de 5 a 10 slides com ganchos de alta retenção (headlines magnéticas), storytelling, contraste visual e chamadas para ação (CTAs) de alta conversão.
+4. **Aplicação com a Ficha do Negócio**: Como utilizar os dados da marca do aluno (segmento, público, proposta de valor, tom de voz, cores da marca e WhatsApp) para gerar criativos e campanhas altamente personalizados.
+5. **Orientação nos Módulos do Curso**: Explicações didáticas, passo a passo descomplicado, encorajamento e dicas práticas.
+
+Diretrizes de resposta:
+- Responda sempre em português do Brasil, com tom entusiasmado, didático, profissional e acolhedor.
+- Use formatação clara em Markdown (tópicos com marcadores, destaques em negrito e blocos de código ou exemplos de prompts prontos para copiar).
+- Se materiais de apoio forem fornecidos no contexto, cite-os referenciando [1], [2], etc.`;
 
 // Vector Normalization to Unit Length (L2 norm = 1)
 function normalizeVector(vector: number[]): number[] {
@@ -15,7 +31,7 @@ function normalizeVector(vector: number[]): number[] {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const pergunta = body.pergunta || body.prompt || (Array.isArray(body.messages) ? body.messages[body.messages.length - 1]?.content : '');
+    const pergunta = body.pergunta || body.prompt || (Array.isArray(body.messages) ? body.messages[body.messages.length - 1]?.content || body.messages[body.messages.length - 1]?.text : '');
 
     if (!pergunta || typeof pergunta !== 'string' || !pergunta.trim()) {
       return NextResponse.json(
@@ -24,107 +40,150 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: 'OPENAI_API_KEY não configurada no servidor. Por favor, adicione sua chave nas configurações.' },
-        { status: 500 }
-      );
-    }
+    const geminiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+    const openaiKey = process.env.OPENAI_API_KEY;
 
-    const supabase = getSupabaseAdmin();
-    const openai = new OpenAI({ apiKey });
-
-    // 1. Generate query embedding with OpenAI text-embedding-3-small (1536 dims)
-    const embedResponse = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: pergunta.trim(),
-      dimensions: 1536,
-    });
-
-    const rawEmbedding = embedResponse.data?.[0]?.embedding || [];
-    if (rawEmbedding.length === 0) {
-      return NextResponse.json(
-        { error: 'Não foi possível gerar o embedding da consulta com a OpenAI.' },
-        { status: 500 }
-      );
-    }
-
-    // 2. Normalize vector to unit length
-    const normalizedEmbedding = normalizeVector(rawEmbedding);
-
-    // 3. Call supabase.rpc("kb_buscar_chunks", { consulta: vetor, qtd: 8, limiar: 0.15 })
-    const { data: chunks, error: rpcError } = await supabase.rpc('kb_buscar_chunks', {
-      consulta: normalizedEmbedding,
-      qtd: 8,
-      limiar: 0.15,
-    });
-
-    if (rpcError) {
-      console.error('Erro na RPC kb_buscar_chunks:', rpcError);
-      return NextResponse.json(
-        { error: `Erro na busca vetorial da base de conhecimento: ${rpcError.message}` },
-        { status: 500 }
-      );
-    }
-
-    // If no chunks found in the database
-    if (!chunks || chunks.length === 0) {
-      return NextResponse.json({
-        resposta: 'Este assunto não foi encontrado no material do workshop Canva com IA. Para obter informações precisas, consulte os tópicos abordados nos módulos ou refaça a pergunta com outros termos.',
-        text: 'Este assunto não foi encontrado no material do workshop Canva com IA. Para obter informações precisas, consulte os tópicos abordados nos módulos ou refaça a pergunta com outros termos.',
-        fontes: [],
-      });
-    }
-
-    // 4. Assemble context with [1], [2] numbering and file references
+    let contextText = '';
     const fontesMap = new Map<number, { numero: number; nome: string; link: string | null; similaridade: number }>();
-    const contextLines: string[] = [];
 
-    chunks.forEach((chunk: any, index: number) => {
-      const sourceNum = index + 1;
-      const docName = chunk.documento_nome || chunk.nome || 'Material do Workshop';
-      const docLink = chunk.documento_link || chunk.link || null;
-      const similarity = chunk.similaridade ? Number(chunk.similaridade) : 0;
+    // 1. Tentar busca semântica na base de conhecimento (RAG) se houver Supabase configurado
+    try {
+      const supabase = getSupabaseAdmin();
+      if (supabase && openaiKey) {
+        const openai = new OpenAI({ apiKey: openaiKey });
+        const embedResponse = await openai.embeddings.create({
+          model: 'text-embedding-3-small',
+          input: pergunta.trim(),
+          dimensions: 1536,
+        });
 
-      fontesMap.set(sourceNum, {
-        numero: sourceNum,
-        nome: docName,
-        link: docLink,
-        similaridade: similarity,
+        const rawEmbedding = embedResponse.data?.[0]?.embedding || [];
+        if (rawEmbedding.length > 0) {
+          const normalizedEmbedding = normalizeVector(rawEmbedding);
+          const { data: chunks } = await supabase.rpc('kb_buscar_chunks', {
+            consulta: normalizedEmbedding,
+            qtd: 6,
+            limiar: 0.12,
+          });
+
+          if (chunks && chunks.length > 0) {
+            const contextLines: string[] = [];
+            chunks.forEach((chunk: any, index: number) => {
+              const sourceNum = index + 1;
+              const docName = chunk.documento_nome || chunk.nome || 'Material do Curso';
+              const docLink = chunk.documento_link || chunk.link || null;
+              const similarity = chunk.similaridade ? Number(chunk.similaridade) : 0;
+
+              fontesMap.set(sourceNum, {
+                numero: sourceNum,
+                nome: docName,
+                link: docLink,
+                similaridade: similarity,
+              });
+
+              contextLines.push(`[${sourceNum}] Documento: ${docName}\nTrecho: ${chunk.conteudo}\n`);
+            });
+            contextText = contextLines.join('\n---\n\n');
+          }
+        }
+      }
+    } catch (ragErr) {
+      console.warn('Busca vetorial na base de conhecimento não retornou dados:', ragErr);
+    }
+
+    // 2. Se Gemini estiver disponível (padrão nativo do Google AI Studio)
+    if (geminiKey) {
+      const ai = new GoogleGenAI({
+        apiKey: geminiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
       });
 
-      contextLines.push(`[${sourceNum}] Fonte: ${docName}\nConteúdo: ${chunk.conteudo}\n`);
-    });
+      // Montar histórico de mensagens se fornecido
+      const incomingMessages: Array<{ role: string; text?: string; content?: string }> = Array.isArray(body.messages) ? body.messages : [];
+      const formattedContents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
 
-    const contextText = contextLines.join('\n---\n\n');
+      if (incomingMessages.length > 1) {
+        for (let i = 0; i < incomingMessages.length - 1; i++) {
+          const msg = incomingMessages[i];
+          const textVal = msg.text || msg.content;
+          if (textVal) {
+            formattedContents.push({
+              role: msg.role === 'user' ? 'user' : 'model',
+              parts: [{ text: textVal }]
+            });
+          }
+        }
+      }
 
-    // 5. Generate response using OpenAI gpt-4o-mini
-    const systemMessage = `Você é a consultora do workshop Canva com IA. Responda usando apenas os trechos do material fornecidos. Cite a fonte entre colchetes, como [1], a cada afirmação. Se os trechos não contiverem a resposta, diga isso com todas as letras em vez de deduzir ou inventar. Fale em português do Brasil, direto e sem enrolação.`;
+      let currentPrompt = pergunta.trim();
+      if (contextText) {
+        currentPrompt = `Trechos da base de conhecimento do curso Canva com IA:\n\n${contextText}\n\nPergunta do aluno:\n${currentPrompt}\n\n(Se utilizar informações dos trechos acima, cite as fontes entre colchetes como [1], [2]).`;
+      }
 
-    const userMessage = `Trechos do material do workshop:\n\n${contextText}\n\nPergunta do aluno: ${pergunta.trim()}`;
+      formattedContents.push({
+        role: 'user',
+        parts: [{ text: currentPrompt }]
+      });
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: systemMessage },
-        { role: 'user', content: userMessage },
-      ],
-    });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents: formattedContents,
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          temperature: 0.7,
+        }
+      });
 
-    const resposta = completion.choices?.[0]?.message?.content || 'Não foi possível gerar a resposta.';
-    const fontes = Array.from(fontesMap.values());
+      const resposta = response.text || 'Olá! Como posso te ajudar na criação dos seus designs no Canva hoje?';
+      const fontes = Array.from(fontesMap.values());
+
+      return NextResponse.json({
+        resposta,
+        text: resposta,
+        fontes,
+      });
+    }
+
+    // 3. Fallback para OpenAI se Gemini não estiver presente
+    if (openaiKey) {
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const userMessage = contextText 
+        ? `Trechos do material do workshop:\n\n${contextText}\n\nPergunta do aluno: ${pergunta.trim()}`
+        : pergunta.trim();
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        temperature: 0.7,
+        messages: [
+          { role: 'system', content: SYSTEM_INSTRUCTION },
+          { role: 'user', content: userMessage },
+        ],
+      });
+
+      const resposta = completion.choices?.[0]?.message?.content || 'Não foi possível gerar a resposta.';
+      const fontes = Array.from(fontesMap.values());
+
+      return NextResponse.json({
+        resposta,
+        text: resposta,
+        fontes,
+      });
+    }
 
     return NextResponse.json({
-      resposta,
-      text: resposta,
-      fontes,
+      resposta: "Olá! Sou sua Conselheira de Canva com IA. Para ativar as respostas em tempo real, configure a chave de API (GEMINI_API_KEY ou OPENAI_API_KEY) nas variáveis de ambiente.",
+      text: "Olá! Sou sua Conselheira de Canva com IA. Para ativar as respostas em tempo real, configure a chave de API (GEMINI_API_KEY ou OPENAI_API_KEY) nas variáveis de ambiente.",
+      fontes: []
     });
+
   } catch (error: any) {
     console.error('Erro na rota /api/consultor:', error);
     return NextResponse.json(
-      { error: error?.message || 'Erro ao processar consulta com a OpenAI.' },
+      { error: error?.message || 'Erro ao processar consulta com a IA.' },
       { status: 500 }
     );
   }
