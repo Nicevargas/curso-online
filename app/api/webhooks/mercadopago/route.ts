@@ -1,6 +1,6 @@
 import { MercadoPagoConfig, Payment } from 'mercadopago';
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdmin, getSupabaseServerClient } from '@/lib/supabaseServer';
 
 export async function POST(request: Request) {
   try {
@@ -14,9 +14,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Configuração incompleta' }, { status: 500 });
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseServiceKey = process.env.MP_service_role || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder';
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+    let supabaseAdmin;
+    try {
+      supabaseAdmin = getSupabaseAdmin();
+    } catch {
+      supabaseAdmin = getSupabaseServerClient();
+    }
 
     const client = new MercadoPagoConfig({ accessToken });
     const { searchParams } = new URL(request.url);
