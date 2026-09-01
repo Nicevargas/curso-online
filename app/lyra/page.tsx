@@ -4,9 +4,11 @@ import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
 import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
-import { Send, Sparkles, User, Bot, Lightbulb, Copy, Check, Palette, BookOpen, Layers, Wand2, ExternalLink, FileText } from 'lucide-react';
+import { Send, Sparkles, User, Bot, Lightbulb, Copy, Check, Palette, BookOpen, Layers, Wand2, ExternalLink, FileText, ClipboardList } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/lib/ThemeContext';
+import BusinessSheetModal from '@/components/BusinessSheetModal';
+import { getLocalBusinessSheet, generatePromptBlock } from '@/lib/businessSheet';
 
 interface Fonte {
   numero: number;
@@ -58,6 +60,7 @@ export default function ConsultoraPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -327,9 +330,42 @@ export default function ConsultoraPage() {
       </div>
 
       {/* Input Form */}
-      <div className={`p-4 sticky bottom-0 z-40 border-t ${
+      <div className={`p-3 sm:p-4 sticky bottom-0 z-40 border-t ${
         isDark ? 'bg-black/90 border-white/5 backdrop-blur-md' : 'bg-white/90 border-slate-200 backdrop-blur-md'
       }`}>
+        {/* Quick Context / Ficha do Negócio Actions */}
+        <div className="max-w-3xl mx-auto mb-2 flex items-center justify-between gap-2 overflow-x-auto text-[11px]">
+          <button
+            type="button"
+            onClick={() => {
+              const sheet = getLocalBusinessSheet();
+              const promptContext = generatePromptBlock(sheet);
+              setInput(prev => prev ? `${prev}\n\n${promptContext}` : promptContext);
+            }}
+            className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition-all font-semibold shrink-0 cursor-pointer ${
+              isDark 
+                ? 'bg-primary/15 border-primary/30 text-primary hover:bg-primary/25' 
+                : 'bg-primary/10 border-primary/20 text-primary hover:bg-primary/15'
+            }`}
+          >
+            <Sparkles className="size-3.5" />
+            <span>Inserir Ficha do Negócio (Canva)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsSheetOpen(true)}
+            className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition-all font-semibold shrink-0 cursor-pointer ${
+              isDark 
+                ? 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10' 
+                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <ClipboardList className="size-3.5 text-primary" />
+            <span>Ver Ficha (Canva)</span>
+          </button>
+        </div>
+
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -358,6 +394,11 @@ export default function ConsultoraPage() {
           </button>
         </form>
       </div>
+
+      <BusinessSheetModal 
+        isOpen={isSheetOpen} 
+        onClose={() => setIsSheetOpen(false)} 
+      />
 
       <BottomNav />
     </main>

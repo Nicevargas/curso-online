@@ -2,16 +2,6 @@ import { MercadoPagoConfig, Payment } from 'mercadopago';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const client = new MercadoPagoConfig({ 
-  accessToken: process.env.MP_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN || '' 
-});
-
-// Use service role key to bypass RLS if needed, or ensure RLS allows this update
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.MP_service_role || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
 export async function POST(request: Request) {
   try {
     const envKeys = Object.keys(process.env);
@@ -23,6 +13,10 @@ export async function POST(request: Request) {
       console.error('Webhook: Mercado Pago Access Token is missing');
       return NextResponse.json({ error: 'Configuração incompleta' }, { status: 500 });
     }
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+    const supabaseServiceKey = process.env.MP_service_role || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder';
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     const client = new MercadoPagoConfig({ accessToken });
     const { searchParams } = new URL(request.url);

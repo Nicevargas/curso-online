@@ -2,10 +2,6 @@ import { MercadoPagoConfig, Preference } from 'mercadopago';
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
-const client = new MercadoPagoConfig({ 
-  accessToken: process.env.MP_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN || '' 
-});
-
 export async function POST(request: Request) {
   try {
     // Debug environment variables

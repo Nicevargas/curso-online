@@ -1,6 +1,6 @@
 'use client';
 
-import { Play, FileText, Sparkles, Clock, X, CheckCircle2 } from 'lucide-react';
+import { Play, FileText, Sparkles, Clock, X, CheckCircle2, ClipboardList } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
@@ -8,6 +8,7 @@ import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { updateUserGamification } from '@/lib/gamification';
 import { useTheme } from '@/lib/ThemeContext';
+import BusinessSheetModal from '@/components/BusinessSheetModal';
 
 interface LessonData {
   id: string;
@@ -34,6 +35,7 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
   const [isCompleted, setIsCompleted] = useState(false);
   const [checkingProgress, setCheckingProgress] = useState(true);
   const [thumbnailError, setThumbnailError] = useState(false);
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   // Reset error when lesson changes
   useEffect(() => {
@@ -159,22 +161,38 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
           </h2>
         </div>
         
-        {lesson.pdf_url && (
-          <motion.a
-            href={lesson.pdf_url}
-            target="_blank"
-            rel="noopener noreferrer"
+        <div className="flex flex-wrap items-center gap-2">
+          <motion.button
+            onClick={() => setIsSheetOpen(true)}
             whileHover={{ y: -2 }}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-all ${
+            whileTap={{ scale: 0.98 }}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border font-bold text-xs transition-all shadow-sm ${
               isDark 
-                ? 'bg-white/5 border-white/10 text-slate-300 hover:text-white hover:bg-white/10' 
-                : 'bg-white border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50 shadow-sm'
+                ? 'bg-primary/20 border-primary/40 text-primary hover:bg-primary/30' 
+                : 'bg-primary/10 border-primary/30 text-primary hover:bg-primary/20'
             }`}
           >
-            <FileText className="size-4 text-primary" />
-            <span className="text-xs font-bold">Material de Apoio</span>
-          </motion.a>
-        )}
+            <ClipboardList className="size-4 text-primary" />
+            <span>Ficha do Negócio (Canva)</span>
+          </motion.button>
+
+          {lesson.pdf_url && (
+            <motion.a
+              href={lesson.pdf_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              whileHover={{ y: -2 }}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border transition-all ${
+                isDark 
+                  ? 'bg-white/5 border-white/10 text-slate-300 hover:text-white hover:bg-white/10' 
+                  : 'bg-white border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50 shadow-sm'
+              }`}
+            >
+              <FileText className="size-4 text-primary" />
+              <span className="text-xs font-bold">Material de Apoio</span>
+            </motion.a>
+          )}
+        </div>
       </div>
 
       <div className="relative group">
@@ -234,11 +252,13 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="absolute inset-0 bg-black"
+                className="absolute inset-0 bg-black select-none"
+                data-protected-video="true"
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
               >
                 <iframe
                   src={getEmbedVideoUrl(lesson.video_url) || ''}
-                  className="w-full h-full border-0"
+                  className="w-full h-full border-0 pointer-events-auto select-none"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                   allowFullScreen
                 />
@@ -276,6 +296,11 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
           <span>{isCompleted ? 'Concluída' : 'Marcar como Concluída'}</span>
         </button>
       </div>
+
+      <BusinessSheetModal 
+        isOpen={isSheetOpen} 
+        onClose={() => setIsSheetOpen(false)} 
+      />
     </section>
   );
 }

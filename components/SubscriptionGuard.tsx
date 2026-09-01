@@ -35,21 +35,51 @@ export default function SubscriptionGuard({ children }: SubscriptionGuardProps) 
           return;
         }
 
-        // Fetch profile to check role and payment status
+        // Fetch profile to check role and payment status using maybeSingle to prevent PGRST116 error if row doesn't exist yet
         const { data: profileData, error: profileError } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', user.id)
-          .single();
+          .maybeSingle();
 
         if (profileError) {
-          console.error('Error fetching profile in SubscriptionGuard:', profileError);
+          console.warn('Notice fetching profile in SubscriptionGuard:', profileError.message || profileError);
         }
 
-        setProfile(profileData);
+        // If profile doesn't exist yet, construct fallback profile and attempt self-heal upsert
+        const effectiveProfile = profileData || {
+          id: user.id,
+          name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Aluno',
+          email: user.email || '',
+          role: 'usuario',
+          level: 1,
+          status: 'Ativo',
+          points: 0,
+          streak: 0,
+          plan: '7_days_free',
+          is_paid: false,
+        };
+
+        setProfile(effectiveProfile);
+
+        // If profile was missing from database, self-heal in background
+        if (!profileData && user.id) {
+          (async () => {
+            try {
+              const { error: upsertErr } = await supabase
+                .from('profiles')
+                .upsert(effectiveProfile, { onConflict: 'id' });
+              if (upsertErr) {
+                console.warn('Could not self-heal profile:', upsertErr.message);
+              }
+            } catch (e: any) {
+              console.warn('Self-heal profile error:', e?.message);
+            }
+          })();
+        }
 
         // Admins and Admin Masters are never blocked
-        const role = (profileData?.role || '').toLowerCase();
+        const role = (effectiveProfile?.role || '').toLowerCase();
         const userEmail = user.email?.toLowerCase() || '';
         const isSuperAdmin = userEmail === 'eunicelvargas@gmail.com';
         const isAdmin = role === 'admin' || role === 'admin master' || role === 'admim master' || isSuperAdmin;
@@ -59,12 +89,12 @@ export default function SubscriptionGuard({ children }: SubscriptionGuardProps) 
           role: role,
           isSuperAdmin,
           isAdmin,
-          plan: profileData?.plan,
-          status: profileData?.status,
-          is_paid: profileData?.is_paid
+          plan: effectiveProfile?.plan,
+          status: effectiveProfile?.status,
+          is_paid: effectiveProfile?.is_paid
         });
 
-        if (isAdmin || profileData?.plan === 'no_charge') {
+        if (isAdmin || effectiveProfile?.plan === 'no_charge') {
           console.log('User is admin or super admin, allowing access.');
           setIsBlocked(false);
           setLoading(false);
@@ -72,20 +102,20 @@ export default function SubscriptionGuard({ children }: SubscriptionGuardProps) 
         }
 
         // If user is already marked as paid, don't block
-        if (profileData?.status === 'Pago' || profileData?.is_paid === true) {
+        if (effectiveProfile?.status === 'Pago' || effectiveProfile?.is_paid === true) {
           console.log('User has paid status, allowing access.');
           setIsBlocked(false);
           setLoading(false);
           return;
         }
 
-        const createdAt = new Date(user.created_at);
+        const createdAt = new Date(user.created_at || Date.now());
         const now = new Date();
         const diffTime = Math.abs(now.getTime() - createdAt.getTime());
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
         // Determine trial days based on plan
-        const trialDays = profileData?.plan === '30_days_free' ? 30 : 7;
+        const trialDays = effectiveProfile?.plan === '30_days_free' ? 30 : 7;
         const remaining = trialDays - Math.floor(diffTime / (1000 * 60 * 60 * 24));
         setDaysRemaining(remaining > 0 ? remaining : 0);
 

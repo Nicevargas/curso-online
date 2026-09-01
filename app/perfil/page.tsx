@@ -3,7 +3,7 @@
 import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
 import { motion } from 'motion/react';
-import { User, Award, Settings, LogOut, Star, TrendingUp, Shield, ArrowRight, CheckCircle2, AlertCircle, X, CreditCard, LayoutDashboard, Sun, Moon } from 'lucide-react';
+import { User, Award, Settings, LogOut, Star, TrendingUp, Shield, ArrowRight, CheckCircle2, AlertCircle, X, CreditCard, LayoutDashboard, Sun, Moon, ClipboardList } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -534,6 +534,23 @@ export default function PerfilPage() {
                         <ArrowRight className="size-5 text-primary group-hover:translate-x-1 transition-transform" />
                       </Link>
                     )}
+
+                    {/* A Ficha do Meu Negócio - Curso Canva */}
+                    <Link 
+                      href="/ficha"
+                      className="flex items-center justify-between p-5 rounded-3xl bg-primary/10 border border-primary/30 hover:bg-primary/20 transition-all hover:pl-6 group"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="size-12 rounded-2xl bg-primary/20 flex items-center justify-center group-hover:scale-110 transition-transform">
+                          <ClipboardList className="size-6 text-primary" />
+                        </div>
+                        <div className="text-left">
+                          <p className="text-base font-bold text-slate-100">Ficha do Negócio (Curso de Canva)</p>
+                          <p className="text-[10px] text-primary/80 uppercase tracking-widest">Módulo 1 · Base de dados e prompts do Canva</p>
+                        </div>
+                      </div>
+                      <ArrowRight className="size-5 text-primary group-hover:translate-x-1 transition-transform" />
+                    </Link>
 
                     {/* Theme Selector (Dark / Light) */}
                     <div className="p-5 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-between">

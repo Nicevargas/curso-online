@@ -51,13 +51,13 @@ export function getEmbedVideoUrl(url: string | null | undefined): string | null 
       } else {
         videoId = videoUrl.searchParams.get('v') || '';
       }
-      if (videoId) return `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+      if (videoId) return `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0&controls=1&playsinline=1`;
     }
 
     // Vimeo
     if (videoUrl.hostname.includes('vimeo.com')) {
       const videoId = videoUrl.pathname.split('/').pop();
-      if (videoId) return `https://player.vimeo.com/video/${videoId}?autoplay=1`;
+      if (videoId) return `https://player.vimeo.com/video/${videoId}?autoplay=1&dnt=1&title=0&byline=0&portrait=0`;
     }
 
     // Google Drive Video

@@ -7,7 +7,7 @@ import BottomNav from '@/components/BottomNav';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, Play, X, Sparkles, Clock, Users, MessageSquare, Users2, CheckSquare, Lightbulb, ArrowRight, Layers, Wand2 } from 'lucide-react';
+import { BookOpen, Play, X, Sparkles, Clock, Users, MessageSquare, Users2, CheckSquare, Lightbulb, ArrowRight, Layers, Wand2, ClipboardList } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
@@ -194,6 +194,47 @@ export default function Page() {
 
             {/* Action Cards Section */}
             <section className="px-4 sm:px-0">
+              {/* Featured Banner: A Ficha do Seu Negócio */}
+              <Link href="/ficha" className="block mb-4">
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  whileHover={{ y: -3 }}
+                  className={`relative overflow-hidden rounded-3xl p-6 transition-all border ${
+                    isDark 
+                      ? 'bg-gradient-to-r from-primary/30 via-accent-purple/20 to-black border-primary/40 hover:border-primary/70' 
+                      : 'bg-gradient-to-r from-primary/10 via-purple-50 to-white border-primary/30 hover:border-primary/50 shadow-sm hover:shadow-md'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+                    <div className="flex items-start sm:items-center gap-4">
+                      <div className="size-14 rounded-2xl bg-primary/20 flex items-center justify-center shrink-0 border border-primary/30 text-primary">
+                        <ClipboardList className="size-7" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="px-2.5 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] font-extrabold uppercase tracking-widest font-mono">
+                            CURSO CANVA COM IA 2.0 · MÓDULO 1
+                          </span>
+                        </div>
+                        <h3 className={`text-xl font-bold font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                          A Ficha do Seu Negócio (Curso de Canva)
+                        </h3>
+                        <p className={`text-sm max-w-xl ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                          Exercício prático e base de prompts exclusiva do Curso de Canva. Preencha uma vez para usar em todos os módulos.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs font-bold text-primary uppercase tracking-widest self-start sm:self-center shrink-0 px-4 py-2.5 rounded-xl bg-primary/10 border border-primary/20">
+                      <span>Acessar Ficha</span>
+                      <ArrowRight className="size-4" />
+                    </div>
+                  </div>
+                </motion.div>
+              </Link>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* 1. Conselheira & Consultora de IA */}
                 <Link href="/lyra">

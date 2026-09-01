@@ -29,3 +29,30 @@
 .gold-gradient {
   background: linear-gradient(135deg, #d4af37 0%, #f9e498 50%, #d4af37 100%);
 }
+
+/* Proteção de Mídia e Vídeo contra inspeção e download */
+video, iframe, [data-protected-video], .aspect-video {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  -khtml-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+video::-webkit-media-controls-enclosure {
+  overflow: hidden;
+}
+
+video::-webkit-media-controls-panel {
+  width: calc(100% + 30px);
+}
+
+/* Desabilita download nativo em controles HTML5 */
+video::-internal-media-controls-download-button {
+  display: none !important;
+}
+
+video::-webkit-media-controls-download-button {
+  display: none !important;
+}

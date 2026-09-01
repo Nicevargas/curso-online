@@ -4,7 +4,7 @@ import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
 import EvolutionDiary from '@/components/EvolutionDiary';
 import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles, CheckCircle2, Circle, Clock, Users as UsersIcon, Play, FileText, X, Calendar } from 'lucide-react';
+import { Sparkles, CheckCircle2, Circle, Clock, Users as UsersIcon, Play, FileText, X, Calendar, ClipboardList } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Image from 'next/image';
@@ -14,6 +14,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { updateUserGamification } from '@/lib/gamification';
 import { useTheme } from '@/lib/ThemeContext';
+import BusinessSheetModal from '@/components/BusinessSheetModal';
 
 interface Journey {
   id: string;
@@ -53,6 +54,7 @@ export default function JornadaPage() {
   const [activeVideo, setActiveVideo] = useState<Challenge | null>(null);
   const [user, setUser] = useState<any>(null);
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -238,7 +240,48 @@ export default function JornadaPage() {
             <p className="text-slate-500 italic">Nenhuma jornada ou desafio encontrado no momento.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <div className="space-y-8">
+            {/* Quick Ficha do Negócio Banner */}
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`p-4 sm:p-5 rounded-3xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm ${
+                isDark 
+                  ? 'bg-gradient-to-r from-primary/20 via-purple-900/10 to-transparent border-primary/30' 
+                  : 'bg-gradient-to-r from-primary/10 via-purple-50 to-white border-primary/20'
+              }`}
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="size-11 rounded-2xl bg-primary/20 flex items-center justify-center text-primary shrink-0 border border-primary/30">
+                  <ClipboardList className="size-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-primary font-mono">
+                      CURSO CANVA COM IA 2.0 · MÓDULO 1
+                    </span>
+                  </div>
+                  <h3 className="text-base font-bold font-display tracking-tight">
+                    Ficha do Negócio (Curso de Canva)
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Consulte os dados da sua marca preenchidos no Módulo 1 do Curso de Canva para usar nos exercícios.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <button
+                  onClick={() => setIsSheetOpen(true)}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-primary/20 transition-all cursor-pointer"
+                >
+                  <ClipboardList className="size-4" />
+                  <span>Abrir Ficha (Canva)</span>
+                </button>
+              </div>
+            </motion.div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             {/* Main Content Column */}
             <div className="lg:col-span-8 space-y-12">
               {/* Featured Journey of the Day */}
@@ -423,10 +466,30 @@ export default function JornadaPage() {
               </div>
             </div>
           </div>
+        </div>
         )}
       </div>
+
+      {/* Floating Consultation Quick Button */}
+      <motion.button
+        onClick={() => setIsSheetOpen(true)}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        className="fixed bottom-24 right-4 z-40 px-4 py-3 rounded-full bg-primary hover:bg-primary/90 text-white font-bold text-xs flex items-center gap-2 shadow-2xl shadow-primary/50 border border-white/20 backdrop-blur-md cursor-pointer"
+        title="Consultar A Ficha do Meu Negócio"
+      >
+        <ClipboardList className="size-4" />
+        <span className="hidden sm:inline">Ficha do Meu Negócio</span>
+        <span className="sm:hidden">Ficha</span>
+      </motion.button>
       
       <BottomNav />
+
+      {/* Business Sheet Modal */}
+      <BusinessSheetModal 
+        isOpen={isSheetOpen} 
+        onClose={() => setIsSheetOpen(false)} 
+      />
 
       {/* Video Modal */}
       <AnimatePresence>
@@ -442,12 +505,14 @@ export default function JornadaPage() {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-4xl aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl"
+              className="relative w-full max-w-4xl aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl select-none"
+              data-protected-video="true"
+              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
               onClick={(e) => e.stopPropagation()}
             >
               <iframe
                 src={getEmbedVideoUrl(activeVideo.media_url || activeVideo.url) || ''}
-                className="w-full h-full border-0"
+                className="w-full h-full border-0 select-none"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                 allowFullScreen
               />

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
 import MistikaLogo from '@/components/Logo';
@@ -127,60 +127,7 @@ export default function AdminDashboardPage() {
     myCompletedLessons: 0
   });
 
-  useEffect(() => {
-    let isMounted = true;
-
-    async function checkAuthAndLoad() {
-      try {
-        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-        if (authError || !authUser) {
-          if (isMounted) window.location.href = '/login';
-          return;
-        }
-
-        if (isMounted) setUser(authUser);
-
-        // Check user role
-        const { data: userProfile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', authUser.id)
-          .maybeSingle();
-
-        const adminCheck = Boolean(
-          userProfile?.role === 'admin' || 
-          authUser.email?.toLowerCase().includes('admin') || 
-          authUser.email?.toLowerCase().includes('eunicelvargas@gmail.com')
-        );
-
-        if (isMounted) {
-          setProfile(userProfile);
-          setIsAdmin(adminCheck);
-        }
-
-        await fetchAllData(adminCheck, authUser.id);
-      } catch (err) {
-        console.error('Error initializing admin:', err);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    }
-
-    checkAuthAndLoad();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
-        window.location.href = '/login';
-      }
-    });
-
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  async function fetchAllData(adminPrivileges: boolean = isAdmin, userId?: string) {
+  const fetchAllData = useCallback(async (adminPrivileges: boolean = isAdmin, userId?: string) => {
     try {
       // 1. Fetch all content / lessons
       const { data: contentData, error: contentError } = await supabase
@@ -232,7 +179,60 @@ export default function AdminDashboardPage() {
     } catch (error) {
       console.error('Error fetching admin data:', error);
     }
-  }
+  }, [isAdmin, user?.id]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function checkAuthAndLoad() {
+      try {
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+        if (authError || !authUser) {
+          if (isMounted) window.location.href = '/login';
+          return;
+        }
+
+        if (isMounted) setUser(authUser);
+
+        // Check user role
+        const { data: userProfile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', authUser.id)
+          .maybeSingle();
+
+        const adminCheck = Boolean(
+          userProfile?.role === 'admin' || 
+          authUser.email?.toLowerCase().includes('admin') || 
+          authUser.email?.toLowerCase().includes('eunicelvargas@gmail.com')
+        );
+
+        if (isMounted) {
+          setProfile(userProfile);
+          setIsAdmin(adminCheck);
+        }
+
+        await fetchAllData(adminCheck, authUser.id);
+      } catch (err) {
+        console.error('Error initializing admin:', err);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    checkAuthAndLoad();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        window.location.href = '/login';
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, [fetchAllData]);
 
   function showToast(text: string, type: 'success' | 'error' = 'success') {
     setNotification({ type, text });

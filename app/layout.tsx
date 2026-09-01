@@ -3,6 +3,7 @@ import { Newsreader, Inter } from 'next/font/google';
 import './globals.css';
 import SubscriptionGuard from '@/components/SubscriptionGuard';
 import { ThemeProvider } from '@/lib/ThemeContext';
+import MediaProtection from '@/components/MediaProtection';
 
 const newsreader = Newsreader({
   subsets: ['latin'],
@@ -52,6 +53,7 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
         ` }} />
       </head>
       <body className="bg-[#f7f6f8] dark:bg-[#000000] text-slate-900 dark:text-slate-100 min-h-screen font-sans transition-colors duration-200" suppressHydrationWarning>
+        <MediaProtection />
         <ThemeProvider>
           <SubscriptionGuard>
             {children}

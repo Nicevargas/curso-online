@@ -1,9 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 
-const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
-
 const SYSTEM_INSTRUCTION = `Você é a Conselheira e Consultora Especialista do curso "Canva com IA - O Desafio".
 Sua missão é ser a mentora prática e consultora criativa dos alunos.
 
@@ -21,12 +18,15 @@ export async function POST(req: NextRequest) {
   try {
     const { messages } = await req.json();
 
-    if (!ai) {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+    if (!apiKey) {
       return NextResponse.json(
         { text: "A chave da API do Gemini não está configurada no servidor. Por favor, adicione GEMINI_API_KEY nas variáveis de ambiente." },
         { status: 200 }
       );
     }
+
+    const ai = new GoogleGenAI({ apiKey });
 
     // Convert messages format for Gemini
     const contents = messages.map((m: { role: string; text: string }) => ({
