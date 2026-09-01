@@ -1,6 +1,6 @@
 'use client';
 
-import { Play, FileText, Sparkles, Clock, X, CheckCircle2, ClipboardList } from 'lucide-react';
+import { Play, FileText, Sparkles, Clock, X, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
@@ -8,7 +8,6 @@ import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { updateUserGamification } from '@/lib/gamification';
 import { useTheme } from '@/lib/ThemeContext';
-import BusinessSheetModal from '@/components/BusinessSheetModal';
 
 interface LessonData {
   id: string;
@@ -35,7 +34,6 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
   const [isCompleted, setIsCompleted] = useState(false);
   const [checkingProgress, setCheckingProgress] = useState(true);
   const [thumbnailError, setThumbnailError] = useState(false);
-  const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   // Reset error when lesson changes
   useEffect(() => {
@@ -162,20 +160,6 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
         </div>
         
         <div className="flex flex-wrap items-center gap-2">
-          <motion.button
-            onClick={() => setIsSheetOpen(true)}
-            whileHover={{ y: -2 }}
-            whileTap={{ scale: 0.98 }}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border font-bold text-xs transition-all shadow-sm ${
-              isDark 
-                ? 'bg-primary/20 border-primary/40 text-primary hover:bg-primary/30' 
-                : 'bg-primary/10 border-primary/30 text-primary hover:bg-primary/20'
-            }`}
-          >
-            <ClipboardList className="size-4 text-primary" />
-            <span>Ficha do Negócio (Canva)</span>
-          </motion.button>
-
           {lesson.pdf_url && (
             <motion.a
               href={lesson.pdf_url}
@@ -296,11 +280,6 @@ export default function FeaturedLesson({ lesson, loading }: FeaturedLessonProps)
           <span>{isCompleted ? 'Concluída' : 'Marcar como Concluída'}</span>
         </button>
       </div>
-
-      <BusinessSheetModal 
-        isOpen={isSheetOpen} 
-        onClose={() => setIsSheetOpen(false)} 
-      />
     </section>
   );
 }
