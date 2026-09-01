@@ -91,87 +91,122 @@ export async function POST(req: NextRequest) {
       console.warn('Busca vetorial na base de conhecimento não retornou dados:', ragErr);
     }
 
-    // 2. Se Gemini estiver disponível (padrão nativo do Google AI Studio)
-    if (geminiKey) {
-      const ai = new GoogleGenAI({
-        apiKey: geminiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
+    // 2. Prioridade: Usar OpenAI (OPENAI_API_KEY) para respostas conforme configurado
+    if (openaiKey) {
+      try {
+        const openai = new OpenAI({ apiKey: openaiKey });
+        
+        // Montar histórico de mensagens para a OpenAI
+        const incomingMessages: Array<{ role: string; text?: string; content?: string }> = Array.isArray(body.messages) ? body.messages : [];
+        const openAiMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+          { role: 'system', content: SYSTEM_INSTRUCTION }
+        ];
+
+        if (incomingMessages.length > 1) {
+          for (let i = 0; i < incomingMessages.length - 1; i++) {
+            const msg = incomingMessages[i];
+            const textVal = msg.content || msg.text;
+            if (textVal) {
+              openAiMessages.push({
+                role: msg.role === 'user' ? 'user' : 'assistant',
+                content: textVal
+              });
+            }
           }
         }
-      });
 
-      // Montar histórico de mensagens se fornecido
-      const incomingMessages: Array<{ role: string; text?: string; content?: string }> = Array.isArray(body.messages) ? body.messages : [];
-      const formattedContents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+        const userMessage = contextText 
+          ? `Trechos da base de conhecimento do curso:\n\n${contextText}\n\nPergunta do aluno:\n${pergunta.trim()}\n\n(Se utilizar informações dos trechos acima, cite as fontes entre colchetes como [1], [2]).`
+          : pergunta.trim();
 
-      if (incomingMessages.length > 1) {
-        for (let i = 0; i < incomingMessages.length - 1; i++) {
-          const msg = incomingMessages[i];
-          const textVal = msg.text || msg.content;
-          if (textVal) {
-            formattedContents.push({
-              role: msg.role === 'user' ? 'user' : 'model',
-              parts: [{ text: textVal }]
-            });
-          }
-        }
-      }
+        openAiMessages.push({
+          role: 'user',
+          content: userMessage
+        });
 
-      let currentPrompt = pergunta.trim();
-      if (contextText) {
-        currentPrompt = `Trechos da base de conhecimento do curso Canva com IA:\n\n${contextText}\n\nPergunta do aluno:\n${currentPrompt}\n\n(Se utilizar informações dos trechos acima, cite as fontes entre colchetes como [1], [2]).`;
-      }
-
-      formattedContents.push({
-        role: 'user',
-        parts: [{ text: currentPrompt }]
-      });
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: formattedContents,
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
           temperature: 0.7,
+          messages: openAiMessages,
+        });
+
+        const resposta = completion.choices?.[0]?.message?.content || 'Olá! Como posso te ajudar na criação dos seus designs no Canva hoje?';
+        const fontes = Array.from(fontesMap.values());
+
+        return NextResponse.json({
+          resposta,
+          text: resposta,
+          fontes,
+        });
+      } catch (openAiErr: any) {
+        console.error('Erro na chamada da OpenAI:', openAiErr);
+        if (!geminiKey) {
+          throw openAiErr;
         }
-      });
-
-      const resposta = response.text || 'Olá! Como posso te ajudar na criação dos seus designs no Canva hoje?';
-      const fontes = Array.from(fontesMap.values());
-
-      return NextResponse.json({
-        resposta,
-        text: resposta,
-        fontes,
-      });
+        console.log('Tentando fallback para Gemini...');
+      }
     }
 
-    // 3. Fallback para OpenAI se Gemini não estiver presente
-    if (openaiKey) {
-      const openai = new OpenAI({ apiKey: openaiKey });
-      const userMessage = contextText 
-        ? `Trechos do material do workshop:\n\n${contextText}\n\nPergunta do aluno: ${pergunta.trim()}`
-        : pergunta.trim();
+    // 3. Fallback para Gemini caso OpenAI não esteja configurada ou falhe
+    if (geminiKey) {
+      try {
+        const ai = new GoogleGenAI({
+          apiKey: geminiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            }
+          }
+        });
 
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        temperature: 0.7,
-        messages: [
-          { role: 'system', content: SYSTEM_INSTRUCTION },
-          { role: 'user', content: userMessage },
-        ],
-      });
+        // Montar histórico de mensagens se fornecido
+        const incomingMessages: Array<{ role: string; text?: string; content?: string }> = Array.isArray(body.messages) ? body.messages : [];
+        const formattedContents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
 
-      const resposta = completion.choices?.[0]?.message?.content || 'Não foi possível gerar a resposta.';
-      const fontes = Array.from(fontesMap.values());
+        if (incomingMessages.length > 1) {
+          for (let i = 0; i < incomingMessages.length - 1; i++) {
+            const msg = incomingMessages[i];
+            const textVal = msg.text || msg.content;
+            if (textVal) {
+              formattedContents.push({
+                role: msg.role === 'user' ? 'user' : 'model',
+                parts: [{ text: textVal }]
+              });
+            }
+          }
+        }
 
-      return NextResponse.json({
-        resposta,
-        text: resposta,
-        fontes,
-      });
+        let currentPrompt = pergunta.trim();
+        if (contextText) {
+          currentPrompt = `Trechos da base de conhecimento do curso Canva com IA:\n\n${contextText}\n\nPergunta do aluno:\n${currentPrompt}\n\n(Se utilizar informações dos trechos acima, cite as fontes entre colchetes como [1], [2]).`;
+        }
+
+        formattedContents.push({
+          role: 'user',
+          parts: [{ text: currentPrompt }]
+        });
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.7-flash',
+          contents: formattedContents,
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            temperature: 0.7,
+          }
+        });
+
+        const resposta = response.text || 'Olá! Como posso te ajudar na criação dos seus designs no Canva hoje?';
+        const fontes = Array.from(fontesMap.values());
+
+        return NextResponse.json({
+          resposta,
+          text: resposta,
+          fontes,
+        });
+      } catch (geminiErr: any) {
+        console.error('Erro na chamada do Gemini:', geminiErr);
+        throw geminiErr;
+      }
     }
 
     return NextResponse.json({
