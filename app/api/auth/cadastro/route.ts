@@ -119,10 +119,11 @@ export async function POST(req: NextRequest) {
         }
 
         userId = signUpData?.user?.id || null;
-      } catch {
+      } catch (clientErr: any) {
+        console.error('Erro ao usar Supabase Client no cadastro:', clientErr);
         return NextResponse.json(
           { 
-            error: 'Configuração do Supabase não encontrada no servidor. Configure a variável SUPABASE_SERVICE_ROLE_KEY ou NEXT_PUBLIC_SUPABASE_ANON_KEY nas configurações de ambiente.' 
+            error: `Erro de conexão com Supabase: ${clientErr?.message || 'Configuração não encontrada no servidor.'}` 
           },
           { status: 500 }
         );
