@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import { Mail, Lock, ArrowRight, Sparkles, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import MistikaLogo from '@/components/Logo';
 
 function LoginForm() {
@@ -25,9 +25,12 @@ function LoginForm() {
 
   useEffect(() => {
     async function checkUser() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        window.location.href = '/';
+      if (!isSupabaseConfigured) return;
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) window.location.href = '/';
+      } catch {
+        // sem conexão com o Supabase: a tela de login continua utilizável
       }
     }
     checkUser();
@@ -35,6 +38,12 @@ function LoginForm() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!isSupabaseConfigured) {
+      setError('O site está sem as variáveis SUPABASE_URL / SUPABASE_ANON_KEY. Refaça o deploy na Vercel.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setStatus('Verificando credenciais...');
@@ -63,7 +72,7 @@ function LoginForm() {
       if (err.message?.includes('rate limit exceeded')) {
         setError('Muitas tentativas de login. Por favor, aguarde alguns minutos.');
       } else if (err.message?.includes('Failed to fetch') || err.message?.includes('fetch failed')) {
-        setError('Não foi possível conectar ao Supabase. Verifique SUPABASE_URL / SUPABASE_ANON_KEY.');
+        setError('Não foi possível conectar ao Supabase. Verifique as variáveis na Vercel e se o projeto Supabase não está pausado.');
       } else {
         setError(err.message || 'Erro ao fazer login. Verifique suas credenciais.');
       }
@@ -94,6 +103,16 @@ function LoginForm() {
           <h1 className="text-3xl font-bold text-slate-100 font-display mb-2">Bem-vinda de volta</h1>
           <p className="text-slate-400">Continue sua jornada de despertar</p>
         </div>
+
+        {!isSupabaseConfigured && (
+          <div className="mb-4 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm">
+            <p className="font-bold mb-1">Conexão com o banco não configurada</p>
+            <p className="text-xs leading-relaxed">
+              O site foi publicado sem SUPABASE_URL / SUPABASE_ANON_KEY. Confira as variáveis na
+              Vercel e refaça o deploy — elas são gravadas durante o build.
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleLogin} className="space-y-4">
           {error && (

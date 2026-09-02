@@ -1,20 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
-// SUPABASE_URL e SUPABASE_ANON_KEY chegam ao navegador via `env` em next.config.ts.
-// (Sem esse mapeamento o Next.js não expõe variáveis sem prefixo NEXT_PUBLIC_.)
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+// Variáveis do projeto: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY.
+// A URL e a chave anônima chegam ao navegador pelo bloco `env` do next.config.ts.
+// A Vercel grava esses valores durante o build: alterou a variável, refaça o deploy.
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  const msg =
-    'SUPABASE_URL e SUPABASE_ANON_KEY (ou as versões com NEXT_PUBLIC_) não estão definidas. ' +
-    'Login e cadastro não vão funcionar até configurá-las (Vercel: Environment Variables; local: .env.local).';
-  if (typeof window !== 'undefined') {
-    console.error(msg);
-  }
+/** false quando as variáveis não chegaram ao navegador (build feito sem elas). */
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+
+if (!isSupabaseConfigured && typeof window !== 'undefined') {
+  console.error(
+    'SUPABASE_URL / SUPABASE_ANON_KEY não chegaram ao navegador. ' +
+      'Confira as variáveis na Vercel e refaça o deploy — elas são gravadas durante o build.'
+  );
 }
 
-// Placeholder apenas para não quebrar o build; em runtime o erro acima já foi logado.
+// Placeholder só para o build não quebrar; em runtime o aviso acima já foi emitido.
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseAnonKey || 'placeholder',
@@ -27,5 +29,3 @@ export const supabase = createClient(
     },
   }
 );
-
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);

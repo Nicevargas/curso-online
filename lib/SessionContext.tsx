@@ -75,15 +75,22 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     let active = true;
 
     async function init() {
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      if (!active) return;
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!active) return;
 
-      setUser(authUser);
-      if (authUser && loadedFor.current !== authUser.id) {
-        loadedFor.current = authUser.id;
-        await loadProfile(authUser.id);
+        setUser(authUser);
+        if (authUser && loadedFor.current !== authUser.id) {
+          loadedFor.current = authUser.id;
+          await loadProfile(authUser.id);
+        }
+      } catch (err) {
+        // Sem conexão com o Supabase: seguimos como visitante em vez de travar
+        // o app na tela de carregamento.
+        console.error('Não foi possível ler a sessão:', err);
+      } finally {
+        if (active) setLoading(false);
       }
-      if (active) setLoading(false);
     }
 
     init();
