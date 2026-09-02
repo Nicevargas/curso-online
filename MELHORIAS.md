@@ -4,8 +4,12 @@ Todos os itens da análise foram aplicados. Build verificado (21 páginas, sem e
 
 ## O que você precisa fazer para tudo funcionar
 
-1. **Rodar UM único arquivo no SQL Editor do Supabase:**
-   `supabase/migrations/20260902180000_setup_completo.sql`
+1. **Rodar dois arquivos no SQL Editor do Supabase, nesta ordem:**
+   1. `supabase/migrations/20260902180000_setup_completo.sql`
+   2. `supabase/migrations/20260902200000_migrar_content_para_lessons.sql`
+      — copia as aulas antigas da tabela `content` para `lessons` mantendo o mesmo id
+      (o progresso de quem já concluiu continua valendo). Testado com o seu CSV real:
+      as 6 aulas entraram na ordem certa, com vídeo, capa e material.
 
    Ele cria tudo o que falta no banco (perfis, cursos, aulas, progresso, matrículas,
    comunidade, planner, dicas, conversas, diário e ficha), na ordem certa, e pode ser

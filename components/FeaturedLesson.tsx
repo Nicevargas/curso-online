@@ -4,7 +4,8 @@ import { Play, FileText, Sparkles, Clock, X, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
+import { getDirectDriveLink } from '@/lib/utils';
+import SecureVideoPlayer from '@/components/SecureVideoPlayer';
 import { supabase } from '@/lib/supabase';
 import { toggleLessonCompletion } from '@/lib/gamification';
 import { useSession } from '@/lib/SessionContext';
@@ -230,12 +231,7 @@ export default function FeaturedLesson({ lesson, loading, courseTitle }: Feature
                 data-protected-video="true"
                 onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
               >
-                <iframe
-                  src={getEmbedVideoUrl(lesson.video_url) || ''}
-                  className="w-full h-full border-0 pointer-events-auto select-none"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                />
+                <SecureVideoPlayer url={lesson.video_url} title={lesson.titulo} />
                 <button 
                   onClick={() => setIsPlaying(false)}
                   className="absolute top-4 right-4 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors z-10"

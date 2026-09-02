@@ -27,7 +27,8 @@ import BottomNav from '@/components/BottomNav';
 import EvolutionDiary from '@/components/EvolutionDiary';
 import BusinessSheetModal from '@/components/BusinessSheetModal';
 import { supabase } from '@/lib/supabase';
-import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
+import { getDirectDriveLink } from '@/lib/utils';
+import SecureVideoPlayer from '@/components/SecureVideoPlayer';
 import { useTheme } from '@/lib/ThemeContext';
 import { useSession } from '@/lib/SessionContext';
 import { useToast } from '@/components/ToastProvider';
@@ -677,13 +678,8 @@ function JornadaPageInner() {
               onClick={(e) => e.stopPropagation()}
               className="relative w-full max-w-4xl"
             >
-              <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl">
-                <iframe
-                  src={getEmbedVideoUrl(activeVideo.media_url || activeVideo.url) || ''}
-                  className="w-full h-full border-0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                />
+              <div className="aspect-video rounded-2xl overflow-hidden shadow-2xl">
+                <SecureVideoPlayer url={activeVideo.media_url || activeVideo.url} title={activeVideo.title} />
               </div>
 
               <div className="flex items-center justify-between gap-3 mt-4">

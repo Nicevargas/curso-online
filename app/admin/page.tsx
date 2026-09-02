@@ -39,7 +39,8 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
+import { getDirectDriveLink } from '@/lib/utils';
+import SecureVideoPlayer from '@/components/SecureVideoPlayer';
 import { useSession } from '@/lib/SessionContext';
 import { useToast } from '@/components/ToastProvider';
 
@@ -1164,13 +1165,8 @@ export default function AdminDashboardPage() {
                 </button>
               </div>
 
-              <div className="relative aspect-video w-full bg-black">
-                <iframe
-                  src={getEmbedVideoUrl(activeVideoUrl) || ''}
-                  className="w-full h-full"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                />
+              <div className="relative aspect-video w-full">
+                <SecureVideoPlayer url={activeVideoUrl} title="Pré-visualização da aula" />
               </div>
             </motion.div>
           </div>

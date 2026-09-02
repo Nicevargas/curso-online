@@ -9,7 +9,8 @@ import { BookOpen, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, FileTe
 import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
 import { supabase } from '@/lib/supabase';
-import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
+import { getDirectDriveLink } from '@/lib/utils';
+import SecureVideoPlayer from '@/components/SecureVideoPlayer';
 import { useTheme } from '@/lib/ThemeContext';
 import { useSession } from '@/lib/SessionContext';
 import { useToast } from '@/components/ToastProvider';
@@ -321,13 +322,8 @@ export default function JourneyDetailPage({ params }: { params: Promise<{ id: st
             onClick={(e) => e.stopPropagation()}
             className="w-full max-w-4xl"
           >
-            <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl">
-              <iframe
-                src={getEmbedVideoUrl(activeVideo.media_url || activeVideo.url) || ''}
-                className="w-full h-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-              />
+            <div className="aspect-video rounded-2xl overflow-hidden shadow-2xl">
+              <SecureVideoPlayer url={activeVideo.media_url || activeVideo.url} title={activeVideo.title} />
             </div>
             <div className="flex items-center justify-between gap-3 mt-4">
               <p className="text-sm font-bold text-white truncate">{activeVideo.title}</p>
