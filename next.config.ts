@@ -5,9 +5,11 @@ const nextConfig: NextConfig = {
   // Expõe ao navegador SOMENTE a URL e a Anon Key do Supabase (ambas públicas por
   // design; a segurança vem do RLS). Sem isso, process.env.SUPABASE_URL é undefined
   // no cliente e login/cadastro falham. A SERVICE_ROLE_KEY NUNCA entra aqui.
+  // Aceita os dois nomes: com e sem o prefixo NEXT_PUBLIC_. Assim funciona
+  // independentemente de como as variáveis estejam cadastradas na Vercel.
   env: {
-    SUPABASE_URL: process.env.SUPABASE_URL ?? '',
-    SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY ?? '',
+    SUPABASE_URL: process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? '',
+    SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '',
   },
   eslint: {
     ignoreDuringBuilds: true,
