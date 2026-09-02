@@ -1,0 +1,15 @@
+{
+  "name": "Portal de Cursos Online",
+  "short_name": "Portal do Aluno",
+  "description": "Cursos online, mentoria e ferramentas de IA para criar com o Canva.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#7311d4",
+  "orientation": "portrait",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

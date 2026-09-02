@@ -7,6 +7,12 @@ import { User, Award, Settings, LogOut, Star, TrendingUp, Shield, ArrowRight, Ch
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { startCheckout } from '@/lib/checkout';
+import { isAdminRole, hasPaidAccess, planLabel } from '@/lib/roles';
+import { DEFAULT_JOURNEY_ID } from '@/lib/courses';
+import { evaluateAchievements, levelFromPoints, EMPTY_STATS, type AchievementStats } from '@/lib/achievements';
+import { useSession } from '@/lib/SessionContext';
+import { useToast } from '@/components/ToastProvider';
 import Image from 'next/image';
 import { getDirectDriveLink } from '@/lib/utils';
 import { useTheme } from '@/lib/ThemeContext';
@@ -33,6 +39,7 @@ export default function PerfilPage() {
   const { theme, setTheme } = useTheme();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [userEmail, setUserEmail] = useState<string>('');
+  const [stats, setStats] = useState<AchievementStats>(EMPTY_STATS);
   const [achievementsCount, setAchievementsCount] = useState(0);
   const [achievements, setAchievements] = useState<{ id: string, title: string }[]>([]);
   const [showAchievements, setShowAchievements] = useState(false);
@@ -81,10 +88,10 @@ export default function PerfilPage() {
             setEditBio(profileData.bio || '');
             setEditAvatar(profileData.avatar_url || '');
             setEditPlan(profileData.plan || '7_days_free');
-            setEditJourneyId(profileData.journey_id || 'fa512a52-9742-410f-a71b-0bd4013bec8d');
+            setEditJourneyId(profileData.journey_id || DEFAULT_JOURNEY_ID);
 
             // Fetch journey title
-            const journeyId = profileData.journey_id || 'fa512a52-9742-410f-a71b-0bd4013bec8d';
+            const journeyId = profileData.journey_id || DEFAULT_JOURNEY_ID;
             const { data: journeyData } = await supabase
               .from('journeys')
               .select('title')
@@ -104,28 +111,55 @@ export default function PerfilPage() {
               setAvailableJourneys(allJourneys);
             }
 
-            // Fetch achievements count and titles
-            const { data: progressData, error: progressError } = await supabase
-              .from('lesson_progress')
-              .select('lesson_id')
-              .eq('user_id', user.id)
-              .eq('completed', true);
-            
-            if (!progressError && progressData) {
-              setAchievementsCount(progressData.length);
-              
-              const lessonIds = progressData.map(p => p.lesson_id);
-              if (lessonIds.length > 0) {
-                const { data: lessonsData } = await supabase
-                  .from('content')
-                  .select('id, title')
-                  .in('id', lessonIds);
-                
-                if (lessonsData) {
-                  setAchievements(lessonsData);
-                }
-              }
+            // Estatísticas para as conquistas (buscas em paralelo)
+            const [progressRes, postsRes, diaryRes, sheetRes] = await Promise.all([
+              supabase.from('lesson_progress').select('lesson_id').eq('user_id', user.id).eq('completed', true),
+              supabase.from('community_posts').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
+              supabase.from('diary_entries').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
+              supabase.from('canva_business_sheets').select('business_name').eq('user_id', user.id).maybeSingle(),
+            ]);
+
+            const completedIds = (progressRes.data || []).map((p: any) => p.lesson_id);
+            setAchievementsCount(completedIds.length);
+
+            // As aulas ficam em `lessons` — antes os títulos eram buscados em `content`,
+            // então a contagem e a lista de conquistas não batiam.
+            if (completedIds.length > 0) {
+              const [{ data: lessonRows }, { data: contentRows }] = await Promise.all([
+                supabase.from('lessons').select('id, titulo').in('id', completedIds),
+                supabase.from('content').select('id, title').in('id', completedIds),
+              ]);
+              const titles = [
+                ...(lessonRows || []).map((l: any) => ({ id: l.id, title: l.titulo })),
+                ...(contentRows || []).map((c: any) => ({ id: c.id, title: c.title })),
+              ];
+              setAchievements(titles);
             }
+
+            // Cursos concluídos
+            const { data: lessonsAll } = await supabase.from('lessons').select('id, journey_id');
+            const byJourney = new Map<string, { total: number; done: number }>();
+            (lessonsAll || []).forEach((l: any) => {
+              if (!l.journey_id) return;
+              const entry = byJourney.get(l.journey_id) || { total: 0, done: 0 };
+              entry.total += 1;
+              if (completedIds.includes(l.id)) entry.done += 1;
+              byJourney.set(l.journey_id, entry);
+            });
+            const coursesCompleted = Array.from(byJourney.values()).filter(
+              (v) => v.total > 0 && v.done >= v.total
+            ).length;
+
+            setStats({
+              lessonsCompleted: completedIds.length,
+              streak: profileData.streak || 0,
+              points: profileData.points || 0,
+              level: profileData.level || 1,
+              coursesCompleted,
+              posts: postsRes.count || 0,
+              diaryEntries: diaryRes.count || 0,
+              sheetCompleted: Boolean(sheetRes.data?.business_name),
+            });
           }
         } else {
           // If no user, redirect to login
@@ -160,6 +194,15 @@ export default function PerfilPage() {
     }
   };
 
+  const handleCheckout = async () => {
+    setCheckoutLoading(true);
+    const result = await startCheckout();
+    if (!result.ok) {
+      setMessage({ type: 'error', text: result.error || 'Erro ao iniciar o pagamento.' });
+    }
+    setCheckoutLoading(false);
+  };
+
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
@@ -174,8 +217,6 @@ export default function PerfilPage() {
           name: editName,
           bio: editBio,
           avatar_url: editAvatar,
-          plan: editPlan,
-          journey_id: editJourneyId
         })
         .eq('id', profile.id);
 
@@ -186,15 +227,7 @@ export default function PerfilPage() {
         name: editName,
         bio: editBio,
         avatar_url: editAvatar,
-        plan: editPlan,
-        journey_id: editJourneyId
       });
-
-      // Update journey title locally
-      const selectedJourney = availableJourneys.find(j => j.id === editJourneyId);
-      if (selectedJourney) {
-        setJourneyTitle(selectedJourney.title);
-      }
       
       setIsEditing(false);
       setMessage({ type: 'success', text: 'Perfil atualizado com sucesso!' });
@@ -290,7 +323,7 @@ export default function PerfilPage() {
                 </div>
                 
                 <div className="flex flex-wrap items-center justify-center lg:justify-start gap-2">
-                  {profile?.role === 'admin' || profile?.role === 'admin master' || profile?.role === 'admim master' ? (
+                  {isAdminRole(profile?.role) ? (
                     <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/20 border border-red-500/30">
                       <Shield className="size-3 text-red-400" />
                       <p className="text-[10px] text-red-400 font-bold uppercase tracking-widest">
@@ -326,29 +359,9 @@ export default function PerfilPage() {
                     </div>
                   )}
                   
-                  {!(profile?.is_paid || profile?.status === 'Pago' || profile?.role === 'admin' || profile?.role === 'admin master' || profile?.role === 'admim master' || profile?.plan === 'no_charge') && (
+                  {!hasPaidAccess(profile) && (
                     <button 
-                      onClick={async () => {
-                        try {
-                          setCheckoutLoading(true);
-                          const response = await fetch('/api/checkout', { method: 'POST' });
-                          const data = await response.json();
-                          if (data.init_point) {
-                            window.location.href = data.init_point;
-                          } else {
-                            setMessage({ 
-                              type: 'error', 
-                              text: data.error || 'Erro ao iniciar checkout.' 
-                            });
-                            if (data.details) console.error('Checkout details:', data.details);
-                          }
-                        } catch (e) {
-                          console.error(e);
-                          setMessage({ type: 'error', text: 'Erro de conexão com o servidor.' });
-                        } finally {
-                          setCheckoutLoading(false);
-                        }
-                      }}
+                      onClick={handleCheckout}
                       disabled={checkoutLoading}
                       className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors disabled:opacity-50"
                     >
@@ -401,30 +414,6 @@ export default function PerfilPage() {
                     placeholder="Link da imagem"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Plano de Assinatura</label>
-                  <select 
-                    value={editPlan}
-                    onChange={(e) => setEditPlan(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-slate-200 focus:outline-none focus:border-primary/50"
-                  >
-                    <option value="7_days_free" className="bg-background-dark">7 dias grátis</option>
-                    <option value="30_days_free" className="bg-background-dark">30 dias grátis</option>
-                    <option value="no_charge" className="bg-background-dark">Sem cobrança</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Sua Jornada</label>
-                  <select 
-                    value={editJourneyId}
-                    onChange={(e) => setEditJourneyId(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-slate-200 focus:outline-none focus:border-primary/50"
-                  >
-                    {availableJourneys.map(j => (
-                      <option key={j.id} value={j.id} className="bg-background-dark">{j.title}</option>
-                    ))}
-                  </select>
-                </div>
                 <div className="flex gap-2 pt-2">
                   <button 
                     type="button"
@@ -474,29 +463,9 @@ export default function PerfilPage() {
                   <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Acesso Rápido</h3>
                   
                   <div className="grid grid-cols-1 gap-3">
-                    {!(profile?.is_paid || profile?.status === 'Pago' || profile?.role === 'admin' || profile?.role === 'admin master' || profile?.role === 'admim master' || profile?.plan === 'no_charge') && (
+                    {!hasPaidAccess(profile) && (
                       <button 
-                        onClick={async () => {
-                          try {
-                            setCheckoutLoading(true);
-                            const response = await fetch('/api/checkout', { method: 'POST' });
-                            const data = await response.json();
-                            if (data.init_point) {
-                              window.location.href = data.init_point;
-                            } else {
-                              setMessage({ 
-                                type: 'error', 
-                                text: data.error || 'Erro ao iniciar checkout.' 
-                              });
-                              if (data.details) console.error('Checkout details:', data.details);
-                            }
-                          } catch (e) {
-                            console.error(e);
-                            setMessage({ type: 'error', text: 'Erro de conexão com o servidor.' });
-                          } finally {
-                            setCheckoutLoading(false);
-                          }
-                        }}
+                        onClick={handleCheckout}
                         disabled={checkoutLoading}
                         className="flex items-center justify-between p-5 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all hover:pl-6 group disabled:opacity-50"
                       >
@@ -593,6 +562,43 @@ export default function PerfilPage() {
                       </div>
                     </div>
 
+                    {/* Gamificação: pontos, sequência e nível existiam no banco e não apareciam */}
+                    <div className="p-5 rounded-3xl bg-white/5 border border-white/10">
+                      <div className="grid grid-cols-3 gap-3 mb-4">
+                        <div className="text-center">
+                          <p className="text-2xl font-bold font-display text-primary leading-none">{stats.points}</p>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-500 mt-1">Pontos</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-2xl font-bold font-display text-orange-400 leading-none">{stats.streak}</p>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-500 mt-1">Sequência</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-2xl font-bold font-display text-accent-gold leading-none">
+                            {levelFromPoints(stats.points).level}
+                          </p>
+                          <p className="text-[10px] uppercase tracking-widest text-slate-500 mt-1">Nível</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] font-bold mb-1.5">
+                        <span className="text-slate-500">
+                          Nível {levelFromPoints(stats.points).level}
+                        </span>
+                        <span className="text-primary font-mono">
+                          {levelFromPoints(stats.points).current}/{levelFromPoints(stats.points).needed} XP
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${levelFromPoints(stats.points).percent}%` }}
+                          transition={{ duration: 0.7, ease: 'easeOut' }}
+                          className="h-full rounded-full bg-gradient-to-r from-primary to-accent-gold"
+                        />
+                      </div>
+                    </div>
+
                     <button 
                       onClick={() => setShowAchievements(true)}
                       className="flex items-center justify-between p-5 rounded-3xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all hover:pl-6 group"
@@ -604,7 +610,7 @@ export default function PerfilPage() {
                         <div className="text-left">
                           <p className="text-base font-bold text-slate-200">Minhas Conquistas</p>
                           <p className="text-[10px] text-slate-500 uppercase tracking-widest">
-                            {achievementsCount} {achievementsCount === 1 ? 'lição concluída' : 'lições concluídas'}
+                            {evaluateAchievements(stats).filter((a) => a.unlocked).length} de {evaluateAchievements(stats).length} desbloqueadas
                           </p>
                         </div>
                       </div>
@@ -663,22 +669,51 @@ export default function PerfilPage() {
             </div>
             
             <div className="p-6 max-h-[60vh] overflow-y-auto space-y-3">
-              {achievements.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-sm text-slate-500 italic">Você ainda não concluiu nenhuma lição.</p>
-                </div>
-              ) : (
-                achievements.map((achievement) => (
-                  <div 
-                    key={achievement.id}
-                    className="p-4 rounded-2xl bg-white/5 border border-white/10 flex items-center gap-4"
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {evaluateAchievements(stats).map((a) => (
+                  <motion.div
+                    key={a.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={`p-4 rounded-2xl border flex items-start gap-3 transition-all ${
+                      a.unlocked
+                        ? 'bg-accent-gold/10 border-accent-gold/30'
+                        : 'bg-white/5 border-white/10 opacity-60'
+                    }`}
                   >
-                    <div className="size-8 rounded-full bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
-                      <CheckCircle2 className="size-4 text-emerald-500" />
+                    <span className={`text-2xl leading-none ${a.unlocked ? '' : 'grayscale'}`}>{a.emoji}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-sm font-bold ${a.unlocked ? 'text-accent-gold' : 'text-slate-300'}`}>
+                        {a.title}
+                      </p>
+                      <p className="text-[11px] text-slate-500 leading-snug">{a.description}</p>
+                      {!a.unlocked && (
+                        <div className="w-full h-1 rounded-full bg-white/10 overflow-hidden mt-2">
+                          <div
+                            className="h-full rounded-full bg-primary/60"
+                            style={{ width: `${Math.round(a.progressValue * 100)}%` }}
+                          />
+                        </div>
+                      )}
                     </div>
-                    <p className="text-sm font-medium text-slate-200">{achievement.title}</p>
+                  </motion.div>
+                ))}
+              </div>
+
+              {achievements.length > 0 && (
+                <div className="pt-4 mt-2 border-t border-white/10">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2">
+                    Aulas concluídas ({achievements.length})
+                  </p>
+                  <div className="space-y-1.5">
+                    {achievements.slice(0, 20).map((achievement) => (
+                      <div key={achievement.id} className="flex items-center gap-2 text-xs text-slate-300">
+                        <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0" />
+                        <span className="truncate">{achievement.title}</span>
+                      </div>
+                    ))}
                   </div>
-                ))
+                </div>
               )}
             </div>
             

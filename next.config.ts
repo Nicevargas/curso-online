@@ -82,6 +82,10 @@ const nextConfig: NextConfig = {
     ],
   },
   transpilePackages: ['motion'],
+  // /escrita era uma página client-side só para redirecionar (tela branca por um instante)
+  async redirects() {
+    return [{ source: '/escrita', destination: '/dicas', permanent: false }];
+  },
   webpack: (config, {dev}) => {
     // HMR is disabled in AI Studio via DISABLE_HMR env var.
     // Do not modifyâfile watching is disabled to prevent flickering during agent edits.

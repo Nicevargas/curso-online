@@ -1,9 +1,10 @@
-import type {Metadata} from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Newsreader, Inter } from 'next/font/google';
 import './globals.css';
 import SubscriptionGuard from '@/components/SubscriptionGuard';
 import { ThemeProvider } from '@/lib/ThemeContext';
-import MediaProtection from '@/components/MediaProtection';
+import { SessionProvider } from '@/lib/SessionContext';
+import { ToastProvider } from '@/components/ToastProvider';
 
 const newsreader = Newsreader({
   subsets: ['latin'],
@@ -18,47 +19,55 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: 'Portal de Cursos Online · Plataforma de Aprendizado & IA',
-  description: 'Plataforma completa de cursos online, mentorias, desafios práticos e consultoria com inteligência artificial.',
+  description:
+    'Plataforma completa de cursos online, mentorias, desafios práticos e consultoria com inteligência artificial.',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    title: 'Portal do Aluno',
+    statusBarStyle: 'black-translucent',
+  },
   icons: {
     icon: 'https://curso.curtatche.com.br/icone_coaet.png',
+    apple: 'https://curso.curtatche.com.br/icone_coaet.png',
   },
 };
 
-export default function RootLayout({children}: {children: React.ReactNode}) {
-  return (
-    <html lang="pt-br" className={`${newsreader.variable} ${inter.variable} dark`} suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: `
-          (function() {
-            try {
-              var savedTheme = localStorage.getItem('app_theme');
-              if (savedTheme === 'light') {
-                document.documentElement.classList.remove('dark');
-                document.documentElement.classList.add('light');
-              } else {
-                document.documentElement.classList.add('dark');
-                document.documentElement.classList.remove('light');
-              }
-            } catch (e) {}
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: dark)', color: '#000000' },
+    { media: '(prefers-color-scheme: light)', color: '#f7f6f8' },
+  ],
+};
 
-            var originalFetch = window.fetch;
-            try {
-              Object.defineProperty(window, 'fetch', {
-                get: function() { return originalFetch; },
-                set: function(v) { console.warn('Attempt to override fetch blocked:', v); },
-                configurable: true
-              });
-            } catch (e) {}
-          })();
-        ` }} />
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="pt-br" className={`${newsreader.variable} ${inter.variable}`} suppressHydrationWarning>
+      <head>
+        {/*
+          Aplica o tema salvo antes do primeiro paint (evita o flash escuro→claro).
+          Esta é a ÚNICA fonte de verdade inicial; o ThemeProvider assume depois.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('app_theme')==='light'?'light':'dark';var r=document.documentElement;r.classList.add(t);r.classList.remove(t==='dark'?'light':'dark');r.style.colorScheme=t;}catch(e){document.documentElement.classList.add('dark');}})();`,
+          }}
+        />
       </head>
-      <body className="bg-[#f7f6f8] dark:bg-[#000000] text-slate-900 dark:text-slate-100 min-h-screen font-sans transition-colors duration-200" suppressHydrationWarning>
-        <MediaProtection />
-        <ThemeProvider>
-          <SubscriptionGuard>
-            {children}
-          </SubscriptionGuard>
-        </ThemeProvider>
+      <body
+        className="bg-[#f7f6f8] dark:bg-[#000000] text-slate-900 dark:text-slate-100 min-h-screen font-sans transition-colors duration-200"
+        suppressHydrationWarning
+      >
+        <SessionProvider>
+          <ThemeProvider>
+            <ToastProvider>
+              <SubscriptionGuard>{children}</SubscriptionGuard>
+            </ToastProvider>
+          </ThemeProvider>
+        </SessionProvider>
       </body>
     </html>
   );

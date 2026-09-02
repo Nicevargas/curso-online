@@ -34,6 +34,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { getDirectDriveLink } from '@/lib/utils';
 import { useTheme } from '@/lib/ThemeContext';
+import { useSession } from '@/lib/SessionContext';
+import { useToast } from '@/components/ToastProvider';
 import {
   CourseWithAccess,
   getCoursesWithUserAccess,
@@ -67,11 +69,10 @@ function greeting() {
 
 export default function Page() {
   const { theme } = useTheme();
+  const { user, profile, loading: sessionLoading } = useSession();
+  const toast = useToast();
   const isDark = theme === 'dark';
   const router = useRouter();
-
-  const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<any>(null);
 
   const [allCourses, setAllCourses] = useState<CourseWithAccess[]>([]);
   const [enrolledCourses, setEnrolledCourses] = useState<CourseWithAccess[]>([]);
@@ -161,35 +162,23 @@ export default function Page() {
   );
 
   useEffect(() => {
-    let isMounted = true;
-
-    async function init() {
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-      if (authError || !authUser) {
-        if (isMounted) window.location.href = '/login';
-        return;
-      }
-      if (isMounted) setUser(authUser);
-
-      const { data: profileData } = await supabase.from('profiles').select('*').eq('id', authUser.id).maybeSingle();
-      if (isMounted && profileData) setProfile(profileData);
-
-      const storedJourneyId = typeof window !== 'undefined' ? localStorage.getItem('active_journey_id') : null;
-      await loadCoursesAndLessons(authUser.id, storedJourneyId || profileData?.journey_id || DEFAULT_JOURNEY_ID);
-      if (isMounted) setLoading(false);
+    if (sessionLoading) return;
+    if (!user) {
+      window.location.href = '/login';
+      return;
     }
 
-    init();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') window.location.href = '/login';
-    });
+    let isMounted = true;
+    (async () => {
+      const storedJourneyId = typeof window !== 'undefined' ? localStorage.getItem('active_journey_id') : null;
+      await loadCoursesAndLessons(user.id, storedJourneyId || profile?.journey_id || DEFAULT_JOURNEY_ID);
+      if (isMounted) setLoading(false);
+    })();
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
     };
-  }, [loadCoursesAndLessons]);
+  }, [sessionLoading, user, profile?.journey_id, loadCoursesAndLessons]);
 
   // ---------- Navegação ----------
   // Abre a grade de aulas do curso. Antes só trocava o estado e nada acontecia na tela.
@@ -223,6 +212,10 @@ export default function Page() {
       }, 1200);
     } else {
       setEnrolling(false);
+      toast.error(
+        'Não foi possível liberar o acesso automaticamente.',
+        'Fale com a administração para ativar este curso na sua conta.'
+      );
     }
   };
 
@@ -637,16 +630,27 @@ export default function Page() {
                     <CheckCircle2 className="size-5" /> Matrícula ativada! Abrindo o curso...
                   </div>
                 ) : selectedCourseModal.isEnrolled ? (
-                  <button
-                    onClick={() => {
-                      const c = selectedCourseModal;
-                      setSelectedCourseModal(null);
-                      openCourse(c);
-                    }}
-                    className="w-full py-3.5 rounded-2xl bg-primary text-white font-bold text-sm shadow-md hover:bg-primary/90 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <Play className="size-4 fill-current" /> Abrir curso
-                  </button>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => {
+                        const c = selectedCourseModal;
+                        setSelectedCourseModal(null);
+                        openCourse(c);
+                      }}
+                      className="w-full py-3.5 rounded-2xl bg-primary text-white font-bold text-sm shadow-md hover:bg-primary/90 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Play className="size-4 fill-current" /> Abrir curso
+                    </button>
+                    <Link
+                      href={`/jornada/${selectedCourseModal.id}`}
+                      onClick={() => setSelectedCourseModal(null)}
+                      className={`block w-full py-3 rounded-2xl font-bold text-sm border text-center transition-colors ${
+                        isDark ? 'border-white/10 text-slate-300 hover:bg-white/5' : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      Ver detalhes e aulas
+                    </Link>
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     <button

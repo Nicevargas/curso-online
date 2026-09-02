@@ -1,0 +1,28 @@
+Arquivos que devem ser APAGADOS do projeto (código morto e duplicado).
+No GitHub Desktop eles aparecerão como alterações depois de você apagá-los.
+
+Apague estes arquivos:
+  components\Hero.tsx
+  components\VideoSection.tsx
+  components\TechniqueCard.tsx
+  components\BehavioralExercise.tsx
+  components\RealChallenge.tsx
+  components\MediaProtection.tsx
+
+Apague estas pastas inteiras:
+  app\escrita
+  app\api\lyra
+  app\api\consultora
+
+Motivo:
+- Hero, VideoSection, TechniqueCard, BehavioralExercise e RealChallenge nao sao
+  usados em lugar nenhum e tem conteudo de outro produto (com barra de progresso falsa).
+- MediaProtection bloqueava F12, Ctrl+S, Ctrl+U e botao direito: nao protegia o video
+  (o iframe e publico) e atrapalhava a aluna que queria copiar um prompt.
+- app/api/lyra e app/api/consultora so reexportavam app/api/consultor.
+- app/escrita era um redirect feito no navegador (tela branca por um instante);
+  agora o redirecionamento esta no next.config.ts.
+
+Atalho no PowerShell (execute dentro da pasta do projeto):
+  Remove-Item components\Hero.tsx, components\VideoSection.tsx, components\TechniqueCard.tsx, components\BehavioralExercise.tsx, components\RealChallenge.tsx, components\MediaProtection.tsx
+  Remove-Item -Recurse app\escrita, app\api\lyra, app\api\consultora

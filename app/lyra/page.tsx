@@ -6,6 +6,11 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Send, Sparkles, User, Bot, Lightbulb, Copy, Check, Palette, BookOpen, Layers, Wand2, ExternalLink, FileText, ClipboardList } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { useSession } from '@/lib/SessionContext';
+import { useToast } from '@/components/ToastProvider';
+import { authHeaders } from '@/lib/checkout';
 import { useTheme } from '@/lib/ThemeContext';
 import BusinessSheetModal from '@/components/BusinessSheetModal';
 import { getLocalBusinessSheet, generatePromptBlock } from '@/lib/businessSheet';
@@ -46,16 +51,19 @@ const QUICK_PROMPTS = [
   }
 ];
 
+const WELCOME: Message = {
+  role: 'model',
+  text: 'Olá! Sou sua **Conselheira e Consultora de Canva com IA**.\n\nEstou aqui para te orientar em todos os assuntos do curso: ferramentas de IA do Canva, criação de prompts de alto impacto, roteiros de carrosséis, identidade visual e estratégias de conteúdo.\n\nComo posso te ajudar no seu projeto de hoje?',
+};
+
 export default function ConsultoraPage() {
   const { theme } = useTheme();
+  const { user, loading: sessionLoading } = useSession();
+  const toast = useToast();
   const isDark = theme === 'dark';
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'model',
-      text: 'Olá! Sou sua **Conselheira e Consultora de Canva com IA**.\n\nEstou aqui para te orientar em todos os assuntos do curso: ferramentas de IA do Canva, criação de prompts de alto impacto, roteiros de carrosséis, identidade visual e estratégias de conteúdo.\n\nComo posso te ajudar no seu projeto de hoje?'
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([WELCOME]);
+  const [streamingText, setStreamingText] = useState('');
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
@@ -63,17 +71,69 @@ export default function ConsultoraPage() {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Histórico persistido: antes a conversa sumia ao trocar de página.
   useEffect(() => {
-    async function checkAuth() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        window.location.href = '/login';
-        return;
+    if (sessionLoading) return;
+    if (!user) {
+      window.location.href = '/login';
+      return;
+    }
+
+    let active = true;
+    (async () => {
+      const { data } = await supabase
+        .from('lyra_messages')
+        .select('role, content, sources, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true })
+        .limit(60);
+
+      if (!active) return;
+      if (data && data.length > 0) {
+        setMessages([
+          WELCOME,
+          ...data.map((m: any) => ({
+            role: m.role === 'user' ? ('user' as const) : ('model' as const),
+            text: m.content,
+            fontes: Array.isArray(m.sources) ? m.sources : undefined,
+          })),
+        ]);
       }
       setLoading(false);
-    }
-    checkAuth();
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [sessionLoading, user]);
+
+  // Prompt enviado pela página de Dicas ("Enviar para a Lyra")
+  useEffect(() => {
+    try {
+      const draft = sessionStorage.getItem('lyra_draft');
+      if (draft) {
+        setInput(draft);
+        sessionStorage.removeItem('lyra_draft');
+      }
+    } catch {}
   }, []);
+
+  const persist = async (role: 'user' | 'assistant', content: string, sources?: any) => {
+    if (!user) return;
+    const { error } = await supabase
+      .from('lyra_messages')
+      .insert({ user_id: user.id, role, content, sources: sources || null });
+    if (error) console.warn('Não foi possível salvar a conversa:', error.message);
+  };
+
+  const handleNewConversation = async () => {
+    if (!user) return;
+    setMessages([WELCOME]);
+    setStreamingText('');
+    const { error } = await supabase.from('lyra_messages').delete().eq('user_id', user.id);
+    if (error) toast.error('Não foi possível limpar o histórico.');
+    else toast.success('Nova conversa iniciada.');
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -84,25 +144,26 @@ export default function ConsultoraPage() {
   }, [messages, isTyping]);
 
   const handleSendMessage = async (textToSend?: string) => {
-    const messageContent = textToSend || input;
-    if (!messageContent.trim()) return;
+    const messageContent = (textToSend || input).trim();
+    if (!messageContent || isTyping) return; // evita requisições concorrentes
 
     const userMessage: Message = { role: 'user', text: messageContent };
-    setMessages(prev => [...prev, userMessage]);
+    const history = [...messages, userMessage];
+    setMessages(history);
     if (!textToSend) setInput('');
     setIsTyping(true);
+    setStreamingText('');
+    persist('user', messageContent);
 
     try {
-      const response = await fetch('/api/consultor', {
+      const response = await fetch('/api/consultor?stream=1', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await authHeaders(),
         body: JSON.stringify({
           pergunta: messageContent,
-          messages: [...messages, userMessage].map(m => ({
-            role: m.role,
-            content: m.text
-          }))
-        })
+          stream: true,
+          messages: history.map((m) => ({ role: m.role, content: m.text })),
+        }),
       });
 
       if (!response.ok) {
@@ -110,32 +171,59 @@ export default function ConsultoraPage() {
         throw new Error(errorData.error || 'Falha ao obter resposta da consultora');
       }
 
-      const data = await response.json();
-      const modelMessage: Message = {
-        role: 'model',
-        text: data.resposta || data.text || 'Desculpe, não consegui obter a resposta no momento.',
-        fontes: Array.isArray(data.fontes) ? data.fontes : undefined
-      };
+      const fontesHeader = response.headers.get('X-Fontes');
+      let fontes: any[] | undefined;
+      if (fontesHeader) {
+        try {
+          fontes = JSON.parse(atob(fontesHeader));
+        } catch {}
+      }
 
-      setMessages(prev => [...prev, modelMessage]);
-    } catch (err: any) {
-      console.error('Error in chat:', err);
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'model',
-          text: err.message ? `Erro na consultoria: ${err.message}` : 'Houve uma falha na conexão com a consultoria. Por favor, tente novamente em alguns instantes.'
+      const contentType = response.headers.get('content-type') || '';
+
+      // Resposta em streaming: o texto aparece aos poucos
+      if (response.body && contentType.includes('text/plain')) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let acc = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          acc += decoder.decode(value, { stream: true });
+          setStreamingText(acc);
         }
-      ]);
+
+        const finalText = acc || 'Desculpe, não consegui obter a resposta no momento.';
+        setMessages((prev) => [...prev, { role: 'model', text: finalText, fontes: fontes?.length ? fontes : undefined }]);
+        setStreamingText('');
+        persist('assistant', finalText, fontes);
+      } else {
+        const data = await response.json();
+        const finalText = data.resposta || data.text || 'Desculpe, não consegui obter a resposta no momento.';
+        const dataFontes = Array.isArray(data.fontes) ? data.fontes : undefined;
+        setMessages((prev) => [...prev, { role: 'model', text: finalText, fontes: dataFontes }]);
+        persist('assistant', finalText, dataFontes);
+      }
+    } catch (err: any) {
+      console.error('Erro no chat:', err);
+      // O erro vira um aviso, não uma "fala" da consultora — antes o texto de erro
+      // entrava no histórico e era reenviado como contexto na pergunta seguinte.
+      toast.error('A consultora não respondeu agora.', err?.message || 'Tente novamente em instantes.');
+      setStreamingText('');
     } finally {
       setIsTyping(false);
     }
   };
 
-  const copyToClipboard = (text: string, index: number) => {
-    navigator.clipboard.writeText(text);
-    setCopiedIndex(index);
-    setTimeout(() => setCopiedIndex(null), 2000);
+  const copyToClipboard = async (text: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    } catch {
+      toast.error('Não foi possível copiar. Selecione o texto e use Ctrl+C.');
+    }
   };
 
   if (loading) {
@@ -178,6 +266,17 @@ export default function ConsultoraPage() {
             </div>
           </div>
         </div>
+
+        {messages.length > 1 && (
+          <button
+            onClick={handleNewConversation}
+            className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer ${
+              isDark ? 'border-white/10 text-slate-300 hover:bg-white/10' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            Nova conversa
+          </button>
+        )}
       </div>
 
       {/* Messages Area */}
@@ -233,9 +332,13 @@ export default function ConsultoraPage() {
                   ? 'bg-[#18151f] border border-white/10 text-slate-200 rounded-bl-none'
                   : 'bg-white border border-slate-200 text-slate-900 rounded-bl-none shadow-sm'
             }`}>
-              <div className="whitespace-pre-wrap font-sans">
-                {message.text}
-              </div>
+              {message.role === 'model' ? (
+                <div className={`prose prose-sm max-w-none font-sans ${isDark ? 'prose-invert' : ''} prose-p:my-2 prose-ul:my-2 prose-li:my-0.5 prose-headings:font-display prose-headings:mt-3 prose-headings:mb-1.5 prose-strong:text-primary prose-code:text-accent-gold prose-pre:bg-black/40 prose-pre:text-xs`}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>
+                </div>
+              ) : (
+                <div className="whitespace-pre-wrap font-sans">{message.text}</div>
+              )}
 
               {/* Cited Sources from RAG Knowledge Base */}
               {message.role === 'model' && message.fontes && message.fontes.length > 0 && (
@@ -308,20 +411,27 @@ export default function ConsultoraPage() {
         ))}
 
         {isTyping && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex gap-3 items-center"
-          >
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex gap-3">
             <div className="size-8 rounded-full bg-gradient-to-tr from-primary to-accent-gold flex items-center justify-center shrink-0 shadow-md">
               <Bot className="size-4 text-white" />
             </div>
-            <div className={`rounded-2xl p-4 border flex items-center gap-1.5 ${
-              isDark ? 'bg-[#18151f] border-white/10' : 'bg-white border-slate-200 shadow-sm'
-            }`}>
-              <div className="size-2 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
-              <div className="size-2 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
-              <div className="size-2 rounded-full bg-primary animate-bounce" />
+            <div
+              className={`max-w-[85%] rounded-3xl rounded-bl-none p-4 sm:p-5 border text-sm ${
+                isDark ? 'bg-[#18151f] border-white/10 text-slate-200' : 'bg-white border-slate-200 text-slate-900 shadow-sm'
+              }`}
+            >
+              {streamingText ? (
+                <div className={`prose prose-sm max-w-none font-sans ${isDark ? 'prose-invert' : ''} prose-p:my-2 prose-strong:text-primary`}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
+                  <span className="inline-block w-1.5 h-4 bg-primary align-middle animate-pulse ml-0.5" />
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <div className="size-2 rounded-full bg-primary animate-bounce [animation-delay:-0.3s]" />
+                  <div className="size-2 rounded-full bg-primary animate-bounce [animation-delay:-0.15s]" />
+                  <div className="size-2 rounded-full bg-primary animate-bounce" />
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -378,7 +488,7 @@ export default function ConsultoraPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Pergunte sobre aulas, ferramentas de IA, prompts ou carrosséis..."
-            disabled={isTyping}
+
             className={`flex-1 px-5 py-3.5 rounded-2xl text-sm border outline-none transition-all ${
               isDark 
                 ? 'bg-white/5 border-white/10 text-slate-100 placeholder:text-slate-500 focus:border-primary' 

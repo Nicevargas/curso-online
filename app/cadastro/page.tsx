@@ -2,16 +2,20 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Mail, Lock, ArrowRight, Sparkles, AlertCircle, User } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Sparkles, AlertCircle, User, Eye, EyeOff, Briefcase } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import MistikaLogo from '@/components/Logo';
+import { getLocalBusinessSheet, saveLocalBusinessSheet } from '@/lib/businessSheet';
 
 export default function CadastroPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [businessName, setBusinessName] = useState('');
+  const [segment, setSegment] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +55,16 @@ export default function CadastroPage() {
         throw new Error(data.error || 'Erro ao criar conta.');
       }
 
+      // Mini-onboarding: já deixa a Ficha do Negócio começada
+      if (businessName.trim() || segment.trim()) {
+        const sheet = getLocalBusinessSheet();
+        saveLocalBusinessSheet({
+          ...sheet,
+          business_name: businessName.trim() || sheet.business_name,
+          segment: segment.trim() || sheet.segment,
+        });
+      }
+
       setStatus('Conta criada com sucesso! Autenticando...');
 
       // 2. Sign in the user immediately
@@ -70,14 +84,14 @@ export default function CadastroPage() {
       window.location.href = '/';
     } catch (err: any) {
       console.error('Erro no cadastro:', err);
+      setStatus(null);
       if (err.message?.includes('rate limit exceeded')) {
-        setError('Muitas tentativas em pouco tempo. Por favor, aguarde alguns instantes antes de tentar novamente.');
+        setError('Muitas tentativas em pouco tempo. Aguarde alguns instantes e tente novamente.');
       } else {
         setError(err.message || 'Erro ao criar conta. Tente novamente.');
       }
     } finally {
       setLoading(false);
-      if (!error) setStatus(null);
     }
   };
 
@@ -162,14 +176,57 @@ export default function CadastroPage() {
             <div className="relative">
               <Lock className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-slate-500" />
               <input 
-                type="password" 
+                type={showPassword ? 'text' : 'password'}
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-slate-100 focus:outline-none focus:border-primary/50 transition-colors"
+                className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-12 text-slate-100 focus:outline-none focus:border-primary/50 transition-colors"
                 placeholder="Mínimo 6 caracteres"
                 minLength={6}
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+              >
+                {showPassword ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Mini-onboarding: a aluna já entra com o contexto do negócio preenchido */}
+          <div className="pt-2 space-y-4 border-t border-white/5">
+            <p className="text-[11px] text-slate-500 pt-3">
+              Opcional — nos ajuda a personalizar os prompts das aulas para você:
+            </p>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Seu negócio</label>
+              <div className="relative">
+                <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-slate-500" />
+                <input
+                  type="text"
+                  value={businessName}
+                  onChange={(e) => setBusinessName(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-slate-100 focus:outline-none focus:border-primary/50 transition-colors"
+                  placeholder="Ex: Confeitaria da Ana"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Segmento</label>
+              <div className="relative">
+                <Sparkles className="absolute left-4 top-1/2 -translate-y-1/2 size-5 text-slate-500" />
+                <input
+                  type="text"
+                  value={segment}
+                  onChange={(e) => setSegment(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-slate-100 focus:outline-none focus:border-primary/50 transition-colors"
+                  placeholder="Ex: confeitaria, estética, consultoria..."
+                />
+              </div>
             </div>
           </div>
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 import OpenAI from 'openai';
 import { getSupabaseAdmin } from '@/lib/supabaseServer';
+import { getUserFromRequest, rateLimit, clientKey } from '@/lib/apiAuth';
 
 export const runtime = 'nodejs';
 
@@ -30,7 +31,22 @@ function normalizeVector(vector: number[]): number[] {
 
 export async function POST(req: NextRequest) {
   try {
+    // Autenticação + limite de uso: sem isso qualquer pessoa consome a cota da OpenAI.
+    const user = await getUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json({ error: 'Faça login para conversar com a consultora.' }, { status: 401 });
+    }
+
+    const limit = rateLimit(clientKey(req, user.id), 20, 60_000);
+    if (!limit.ok) {
+      return NextResponse.json(
+        { error: `Muitas perguntas seguidas. Tente novamente em ${limit.retryAfter}s.` },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
+    const wantsStream = body.stream === true || new URL(req.url).searchParams.get('stream') === '1';
     const pergunta = body.pergunta || body.prompt || (Array.isArray(body.messages) ? body.messages[body.messages.length - 1]?.content || body.messages[body.messages.length - 1]?.text : '');
 
     if (!pergunta || typeof pergunta !== 'string' || !pergunta.trim()) {
@@ -124,6 +140,44 @@ export async function POST(req: NextRequest) {
           content: userMessage
         });
 
+        const fontesHeader = Buffer.from(
+          JSON.stringify(Array.from(fontesMap.values()))
+        ).toString('base64');
+
+        // Streaming: a resposta aparece palavra a palavra em vez de esperar 5-15s.
+        if (wantsStream) {
+          const stream = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            temperature: 0.7,
+            messages: openAiMessages,
+            stream: true,
+          });
+
+          const encoder = new TextEncoder();
+          const readable = new ReadableStream({
+            async start(controller) {
+              try {
+                for await (const chunk of stream) {
+                  const delta = chunk.choices?.[0]?.delta?.content;
+                  if (delta) controller.enqueue(encoder.encode(delta));
+                }
+              } catch (streamErr) {
+                console.error('Erro durante o streaming da OpenAI:', streamErr);
+              } finally {
+                controller.close();
+              }
+            },
+          });
+
+          return new Response(readable, {
+            headers: {
+              'Content-Type': 'text/plain; charset=utf-8',
+              'Cache-Control': 'no-cache, no-transform',
+              'X-Fontes': fontesHeader,
+            },
+          });
+        }
+
         const completion = await openai.chat.completions.create({
           model: 'gpt-4o-mini',
           temperature: 0.7,
@@ -187,7 +241,7 @@ export async function POST(req: NextRequest) {
         });
 
         const response = await ai.models.generateContent({
-          model: 'gemini-3.7-flash',
+          model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
           contents: formattedContents,
           config: {
             systemInstruction: SYSTEM_INSTRUCTION,

@@ -1,459 +1,514 @@
 'use client';
 
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import {
+  Plus,
+  Check,
+  Trash2,
+  Calendar,
+  X,
+  ListChecks,
+  Flag,
+  CheckCircle2,
+  CalendarClock,
+} from 'lucide-react';
+
 import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  CheckSquare, Plus, Calendar, Clock, Sparkles, Trash2, 
-  Tag, Filter, CheckCircle2, Circle, AlertCircle, Layers, 
-  Palette, Video, Image as ImageIcon, BookOpen, Flame
-} from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/lib/ThemeContext';
+import { useSession } from '@/lib/SessionContext';
+import { useToast } from '@/components/ToastProvider';
 
 interface Task {
   id: string;
   title: string;
-  category: 'carrossel' | 'video' | 'post' | 'story' | 'marca' | 'estudo';
+  category: string;
   priority: 'alta' | 'media' | 'baixa';
-  dueDate: string;
+  due_date: string | null;
   completed: boolean;
-  createdAt: string;
+  created_at: string;
 }
 
-const CATEGORY_MAP: Record<string, { label: string; icon: any; color: string }> = {
-  carrossel: { label: 'Carrossel Canva', icon: Layers, color: 'text-purple-400 bg-purple-500/10 border-purple-500/20' },
-  video: { label: 'Vídeo / Reels', icon: Video, color: 'text-pink-400 bg-pink-500/10 border-pink-500/20' },
-  post: { label: 'Post / Feed', icon: ImageIcon, color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' },
-  story: { label: 'Stories / Banner', icon: Sparkles, color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
-  marca: { label: 'Identidade Visual', icon: Palette, color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
-  estudo: { label: 'Estudo do Curso', icon: BookOpen, color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20' },
-};
+const CATEGORIES = ['Estudo', 'Criação', 'Publicação', 'Negócio', 'Pessoal'];
 
-const DEFAULT_TASKS: Task[] = [
-  {
-    id: '1',
-    title: 'Criar primeiro Carrossel de 5 slides com IA no Canva',
-    category: 'carrossel',
-    priority: 'alta',
-    dueDate: 'Hoje',
-    completed: false,
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: '2',
-    title: 'Gerar 3 imagens fotorealistas no Magic Media',
-    category: 'post',
-    priority: 'alta',
-    dueDate: 'Hoje',
-    completed: true,
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: '3',
-    title: 'Definir paleta de cores e tipografia no Brand Kit',
-    category: 'marca',
-    priority: 'media',
-    dueDate: 'Amanhã',
-    completed: false,
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: '4',
-    title: 'Assistir aula de edição mágica de vídeo no Canva',
-    category: 'estudo',
-    priority: 'baixa',
-    dueDate: 'Esta Semana',
-    completed: false,
-    createdAt: new Date().toISOString()
-  }
+const PRIORITIES: Array<{ key: Task['priority']; label: string; className: string }> = [
+  { key: 'alta', label: 'Alta', className: 'bg-red-500/15 text-red-400 border-red-500/30' },
+  { key: 'media', label: 'Média', className: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
+  { key: 'baixa', label: 'Baixa', className: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
 ];
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+function formatDue(date: string | null) {
+  if (!date) return null;
+  const today = todayISO();
+  const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+  if (date === today) return { label: 'Hoje', late: false };
+  if (date === tomorrow) return { label: 'Amanhã', late: false };
+  const late = date < today;
+  return {
+    label: new Date(`${date}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
+    late,
+  };
+}
 
 export default function PlannerPage() {
   const { theme } = useTheme();
+  const { user, loading: sessionLoading } = useSession();
+  const toast = useToast();
   const isDark = theme === 'dark';
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'completed'>('all');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<string>('todas');
+  const [modalOpen, setModalOpen] = useState(false);
 
-  // Form State
   const [newTitle, setNewTitle] = useState('');
-  const [newCategory, setNewCategory] = useState<Task['category']>('carrossel');
+  const [newCategory, setNewCategory] = useState(CATEGORIES[0]);
   const [newPriority, setNewPriority] = useState<Task['priority']>('media');
-  const [newDueDate, setNewDueDate] = useState('Hoje');
+  const [newDue, setNewDue] = useState(todayISO());
+  const [saving, setSaving] = useState(false);
+
+  // ---------- Dados no Supabase (antes ficavam só no localStorage do navegador) ----------
+  const loadTasks = useCallback(async (userId: string) => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('planner_tasks')
+      .select('*')
+      .eq('user_id', userId)
+      .order('completed', { ascending: true })
+      .order('due_date', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Erro ao carregar tarefas:', error);
+      toast.error('Não foi possível carregar suas tarefas.', error.message);
+    }
+    setTasks((data as Task[]) || []);
+    setLoading(false);
+  }, [toast]);
 
   useEffect(() => {
-    async function init() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        window.location.href = '/login';
-        return;
-      }
+    if (sessionLoading) return;
+    if (!user) {
+      window.location.href = '/login';
+      return;
+    }
+    loadTasks(user.id);
+  }, [sessionLoading, user, loadTasks]);
 
-      // Load from localStorage or defaults
-      const savedTasks = localStorage.getItem(`planner_tasks_${user.id}`);
-      if (savedTasks) {
-        try {
-          setTasks(JSON.parse(savedTasks));
-        } catch (e) {
-          setTasks(DEFAULT_TASKS);
-        }
-      } else {
-        setTasks(DEFAULT_TASKS);
-      }
-      setLoading(false);
+  // ---------- Ações ----------
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim() || !user) return;
+
+    setSaving(true);
+    const { data, error } = await supabase
+      .from('planner_tasks')
+      .insert({
+        user_id: user.id,
+        title: newTitle.trim(),
+        category: newCategory,
+        priority: newPriority,
+        due_date: newDue || null,
+      })
+      .select()
+      .single();
+
+    setSaving(false);
+
+    if (error) {
+      toast.error('Não foi possível criar a tarefa.', error.message);
+      return;
     }
 
-    init();
-  }, []);
+    setTasks((prev) => [data as Task, ...prev]);
+    setNewTitle('');
+    setNewPriority('media');
+    setNewDue(todayISO());
+    setModalOpen(false);
+    toast.success('Tarefa adicionada ao seu planner.');
+  };
 
-  const saveTasks = (updated: Task[]) => {
-    setTasks(updated);
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        localStorage.setItem(`planner_tasks_${user.id}`, JSON.stringify(updated));
+  const handleToggle = async (task: Task) => {
+    const next = !task.completed;
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: next } : t)));
+
+    const { error } = await supabase.from('planner_tasks').update({ completed: next }).eq('id', task.id);
+    if (error) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, completed: !next } : t)));
+      toast.error('Não foi possível atualizar a tarefa.');
+      return;
+    }
+
+    if (next) {
+      const remaining = tasks.filter((t) => !t.completed && t.id !== task.id).length;
+      if (remaining === 0) {
+        toast.celebrate();
+        toast.reward('Tudo concluído! 🎉', 'Sua lista está zerada. Que tal registrar isso no diário?');
       }
+    }
+  };
+
+  const handleDelete = async (task: Task) => {
+    const previous = tasks;
+    setTasks((prev) => prev.filter((t) => t.id !== task.id));
+
+    const { error } = await supabase.from('planner_tasks').delete().eq('id', task.id);
+    if (error) {
+      setTasks(previous);
+      toast.error('Não foi possível excluir a tarefa.');
+      return;
+    }
+
+    toast.toast('Tarefa excluída.', {
+      kind: 'info',
+      detail: task.title,
     });
   };
 
-  const handleToggleTask = (id: string) => {
-    const updated = tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t);
-    saveTasks(updated);
-  };
+  // ---------- Derivados ----------
+  const filtered = useMemo(() => {
+    return tasks.filter((t) => {
+      if (filter === 'pending' && t.completed) return false;
+      if (filter === 'completed' && !t.completed) return false;
+      if (categoryFilter !== 'todas' && t.category !== categoryFilter) return false;
+      return true;
+    });
+  }, [tasks, filter, categoryFilter]);
 
-  const handleDeleteTask = (id: string) => {
-    const updated = tasks.filter(t => t.id !== id);
-    saveTasks(updated);
-  };
+  const todayTasks = useMemo(() => tasks.filter((t) => t.due_date === todayISO()), [tasks]);
+  const todayDone = todayTasks.filter((t) => t.completed).length;
+  const todayPercent = todayTasks.length > 0 ? Math.round((todayDone / todayTasks.length) * 100) : 0;
+  const lateCount = tasks.filter((t) => !t.completed && t.due_date && t.due_date < todayISO()).length;
 
-  const handleAddTask = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim()) return;
-
-    const newTask: Task = {
-      id: Date.now().toString(),
-      title: newTitle.trim(),
-      category: newCategory,
-      priority: newPriority,
-      dueDate: newDueDate,
-      completed: false,
-      createdAt: new Date().toISOString()
-    };
-
-    saveTasks([newTask, ...tasks]);
-    setNewTitle('');
-    setShowAddModal(false);
-  };
-
-  const filteredTasks = tasks.filter(t => {
-    const matchesFilter = filter === 'all' ? true : filter === 'completed' ? t.completed : !t.completed;
-    const matchesCategory = selectedCategory === 'all' ? true : t.category === selectedCategory;
-    return matchesFilter && matchesCategory;
-  });
-
-  const completedCount = tasks.filter(t => t.completed).length;
-  const pendingCount = tasks.length - completedCount;
-
-  if (loading) {
-    return (
-      <main className={`min-h-screen flex items-center justify-center ${
-        isDark ? 'bg-[#000000]' : 'bg-[#f7f6f8]'
-      }`}>
-        <motion.div 
-          animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-          className="size-8 border-2 border-primary border-t-transparent rounded-full"
-        />
-      </main>
-    );
-  }
+  const card = isDark ? 'bg-white/[0.03] border-white/10' : 'bg-white border-slate-200 shadow-sm';
+  const soft = isDark ? 'text-slate-400' : 'text-slate-600';
 
   return (
-    <main className={`min-h-screen flex flex-col relative pb-24 transition-colors duration-200 ${
-      isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'
-    }`}>
+    <main
+      className={`min-h-screen relative pb-28 transition-colors duration-200 ${
+        isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'
+      }`}
+    >
       <Header />
-      
-      <div className="max-w-4xl mx-auto w-full px-4 py-8 space-y-8">
-        {/* Page Title & Action */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="size-12 rounded-2xl bg-gradient-to-tr from-primary to-accent-purple/50 flex items-center justify-center border border-primary/30 shadow-lg shadow-primary/20">
-              <CheckSquare className="size-6 text-white" />
-            </div>
+
+      <div className="max-w-3xl mx-auto px-4 py-6 sm:py-8">
+        {/* Cabeçalho + progresso do dia */}
+        <section className={`rounded-3xl border p-5 sm:p-6 mb-6 ${card}`}>
+          <div className="flex items-start justify-between gap-4 mb-4">
             <div>
-              <h1 className={`text-2xl font-bold font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                Planner de Tarefas
-              </h1>
-              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                Organize sua rotina de criação no Canva com IA
+              <span className="px-2.5 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] font-extrabold uppercase tracking-widest font-mono">
+                Planner
+              </span>
+              <h1 className="text-2xl sm:text-3xl font-bold font-display tracking-tight mt-2">Metas & Tarefas</h1>
+              <p className={`text-sm mt-1 ${soft}`}>
+                {todayTasks.length === 0
+                  ? 'Nada marcado para hoje. Que tal planejar um passo?'
+                  : todayPercent === 100
+                    ? 'Você concluiu tudo o que planejou para hoje! 🎉'
+                    : `${todayDone} de ${todayTasks.length} tarefas de hoje concluídas.`}
               </p>
             </div>
-          </div>
-
-          <button 
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-primary hover:bg-primary/90 text-white font-semibold text-xs tracking-wider uppercase transition-all shadow-lg shadow-primary/20 cursor-pointer"
-          >
-            <Plus className="size-4" />
-            Nova Tarefa
-          </button>
-        </div>
-
-        {/* Overview Stats Card */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className={`border rounded-2xl p-5 flex items-center justify-between ${
-            isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm'
-          }`}>
-            <div>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Pendentes</span>
-              <p className={`text-2xl font-bold mt-1 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{pendingCount}</p>
-            </div>
-            <div className="size-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-              <Clock className="size-5" />
-            </div>
-          </div>
-
-          <div className={`border rounded-2xl p-5 flex items-center justify-between ${
-            isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm'
-          }`}>
-            <div>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Concluídas</span>
-              <p className={`text-2xl font-bold mt-1 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{completedCount}</p>
-            </div>
-            <div className="size-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-              <CheckCircle2 className="size-5" />
-            </div>
-          </div>
-
-          <div className={`border rounded-2xl p-5 flex items-center justify-between ${
-            isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm'
-          }`}>
-            <div>
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total de Metas</span>
-              <p className={`text-2xl font-bold mt-1 ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{tasks.length}</p>
-            </div>
-            <div className="size-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
-              <Sparkles className="size-5" />
-            </div>
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className={`flex items-center gap-1.5 p-1 rounded-2xl border w-fit ${
-            isDark ? 'bg-white/5 border-white/10' : 'bg-slate-100 border-slate-200'
-          }`}>
             <button
-              onClick={() => setFilter('all')}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                filter === 'all' 
-                  ? 'bg-primary text-white shadow-md' 
-                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={() => setModalOpen(true)}
+              className="shrink-0 size-11 rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/25 hover:bg-primary/90 transition-all cursor-pointer"
+              aria-label="Nova tarefa"
             >
-              Todas ({tasks.length})
-            </button>
-            <button
-              onClick={() => setFilter('pending')}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                filter === 'pending' 
-                  ? 'bg-primary text-white shadow-md' 
-                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Pendentes ({pendingCount})
-            </button>
-            <button
-              onClick={() => setFilter('completed')}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                filter === 'completed' 
-                  ? 'bg-primary text-white shadow-md' 
-                  : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Concluídas ({completedCount})
+              <Plus className="size-5" />
             </button>
           </div>
-        </div>
 
-        {/* Tasks List */}
-        <div className="space-y-3">
-          {filteredTasks.length === 0 ? (
-            <div className={`p-12 text-center rounded-3xl border border-dashed ${
-              isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'
-            }`}>
-              <CheckSquare className="size-10 text-slate-400 mx-auto mb-3" />
-              <p className="text-sm text-slate-500">Nenhuma tarefa encontrada neste filtro.</p>
-            </div>
-          ) : (
-            filteredTasks.map((task) => {
-              const cat = CATEGORY_MAP[task.category] || CATEGORY_MAP.carrossel;
-              const CatIcon = cat.icon;
-              return (
+          {todayTasks.length > 0 && (
+            <div className="mb-4">
+              <div className="w-full h-2.5 rounded-full bg-white/10 overflow-hidden">
                 <motion.div
-                  key={task.id}
-                  layout
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`p-4 sm:p-5 rounded-2xl border transition-all flex items-center justify-between gap-4 ${
-                    task.completed 
-                      ? 'border-emerald-500/20 bg-emerald-500/5 opacity-75' 
-                      : isDark ? 'bg-white/5 border-white/10 hover:border-primary/40' : 'bg-white border-slate-200 shadow-sm hover:border-primary/40'
-                  }`}
-                >
-                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                  initial={{ width: 0 }}
+                  animate={{ width: `${todayPercent}%` }}
+                  transition={{ duration: 0.6, ease: 'easeOut' }}
+                  className="h-full rounded-full bg-gradient-to-r from-primary to-accent-purple"
+                />
+              </div>
+            </div>
+          )}
+
+          {lateCount > 0 && (
+            <div className="flex items-center gap-2 text-xs font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-2xl px-3 py-2 mb-4">
+              <CalendarClock className="size-4" />
+              {lateCount} {lateCount === 1 ? 'tarefa atrasada' : 'tarefas atrasadas'}
+            </div>
+          )}
+
+          {/* Filtros */}
+          <div className="flex flex-wrap gap-2">
+            {([
+              { key: 'all', label: 'Todas' },
+              { key: 'pending', label: 'Pendentes' },
+              { key: 'completed', label: 'Concluídas' },
+            ] as const).map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${
+                  filter === f.key
+                    ? 'bg-primary text-white border-primary'
+                    : isDark
+                      ? 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+
+            <span className={`mx-1 self-center ${soft}`}>·</span>
+
+            {/* Filtro por categoria — existia no estado e não tinha interface */}
+            <button
+              onClick={() => setCategoryFilter('todas')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${
+                categoryFilter === 'todas'
+                  ? 'bg-primary/15 text-primary border-primary/40'
+                  : isDark
+                    ? 'bg-white/5 border-white/10 text-slate-300'
+                    : 'bg-white border-slate-200 text-slate-600'
+              }`}
+            >
+              Tudo
+            </button>
+            {CATEGORIES.map((c) => (
+              <button
+                key={c}
+                onClick={() => setCategoryFilter(c)}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold border transition-all cursor-pointer ${
+                  categoryFilter === c
+                    ? 'bg-primary/15 text-primary border-primary/40'
+                    : isDark
+                      ? 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Lista */}
+        {loading ? (
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className={`h-20 rounded-3xl border animate-pulse ${card}`} />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className={`p-12 rounded-3xl border border-dashed text-center ${card}`}>
+            <ListChecks className="size-10 text-slate-400 mx-auto mb-3" />
+            <p className="text-sm text-slate-500 mb-3">
+              {tasks.length === 0
+                ? 'Seu planner está vazio. Crie a primeira tarefa!'
+                : 'Nenhuma tarefa neste filtro.'}
+            </p>
+            <button
+              onClick={() => (tasks.length === 0 ? setModalOpen(true) : (setFilter('all'), setCategoryFilter('todas')))}
+              className="text-xs font-bold text-primary hover:underline cursor-pointer"
+            >
+              {tasks.length === 0 ? 'Criar tarefa' : 'Limpar filtros'}
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            <AnimatePresence initial={false}>
+              {filtered.map((task) => {
+                const due = formatDue(task.due_date);
+                const priority = PRIORITIES.find((p) => p.key === task.priority) || PRIORITIES[1];
+                return (
+                  <motion.div
+                    key={task.id}
+                    layout
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                    className={`group rounded-3xl border p-4 flex items-start gap-3 transition-colors ${card} ${
+                      task.completed ? 'opacity-60' : ''
+                    }`}
+                  >
                     <button
-                      onClick={() => handleToggleTask(task.id)}
-                      className="shrink-0 transition-transform active:scale-90 cursor-pointer"
+                      onClick={() => handleToggle(task)}
+                      aria-label={task.completed ? 'Marcar como pendente' : 'Marcar como concluída'}
+                      className={`size-6 rounded-lg border-2 flex items-center justify-center shrink-0 mt-0.5 transition-all cursor-pointer ${
+                        task.completed
+                          ? 'bg-emerald-500 border-emerald-500 text-white'
+                          : isDark
+                            ? 'border-white/20 hover:border-primary'
+                            : 'border-slate-300 hover:border-primary'
+                      }`}
                     >
-                      {task.completed ? (
-                        <CheckCircle2 className="size-6 text-emerald-400" />
-                      ) : (
-                        <Circle className="size-6 text-slate-400 hover:text-primary transition-colors" />
-                      )}
+                      {task.completed && <Check className="size-4" />}
                     </button>
 
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-sm font-medium transition-all truncate ${
-                        task.completed 
-                          ? 'line-through text-slate-400' 
-                          : isDark ? 'text-slate-100' : 'text-slate-900'
-                      }`}>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-bold leading-snug ${task.completed ? 'line-through' : ''}`}>
                         {task.title}
                       </p>
-                      
                       <div className="flex flex-wrap items-center gap-2 mt-2">
-                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 uppercase tracking-wider ${cat.color}`}>
-                          <CatIcon className="size-3" />
-                          {cat.label}
+                        <span
+                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
+                            isDark ? 'bg-white/5 border-white/10 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'
+                          }`}
+                        >
+                          {task.category}
                         </span>
-                        
-                        <span className={`text-[10px] font-semibold flex items-center gap-1 ${
-                          isDark ? 'text-slate-400' : 'text-slate-500'
-                        }`}>
-                          <Calendar className="size-3" />
-                          {task.dueDate}
+                        <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border ${priority.className}`}>
+                          {priority.label}
                         </span>
+                        {due && (
+                          <span
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border flex items-center gap-1 ${
+                              due.late && !task.completed
+                                ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                                : isDark
+                                  ? 'bg-white/5 border-white/10 text-slate-400'
+                                  : 'bg-slate-50 border-slate-200 text-slate-500'
+                            }`}
+                          >
+                            <Calendar className="size-3" />
+                            {due.label}
+                          </span>
+                        )}
                       </div>
                     </div>
-                  </div>
 
-                  <button
-                    onClick={() => handleDeleteTask(task.id)}
-                    className="p-2 rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0 cursor-pointer"
-                    title="Excluir tarefa"
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
-                </motion.div>
-              );
-            })
-          )}
-        </div>
+                    <button
+                      onClick={() => handleDelete(task)}
+                      aria-label="Excluir tarefa"
+                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-slate-400 hover:text-red-400 transition-all shrink-0 cursor-pointer"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </div>
+        )}
       </div>
 
-      {/* Add Task Modal */}
+      {/* Modal nova tarefa */}
       <AnimatePresence>
-        {showAddModal && (
+        {modalOpen && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-            onClick={() => setShowAddModal(false)}
+            className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+            onClick={() => setModalOpen(false)}
           >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
+            <motion.form
+              initial={{ y: 30, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 30, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
-              className={`w-full max-w-lg border rounded-3xl p-6 sm:p-8 shadow-2xl ${
-                isDark ? 'bg-[#121214] border-white/10 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+              onSubmit={handleCreate}
+              className={`w-full max-w-md rounded-3xl border p-6 shadow-2xl ${
+                isDark ? 'bg-[#0f0b15] border-white/10' : 'bg-white border-slate-200'
               }`}
             >
-              <h2 className="text-xl font-bold font-display mb-4">Adicionar Nova Tarefa</h2>
-              
-              <form onSubmit={handleAddTask} className="space-y-4">
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-bold font-display">Nova tarefa</h2>
+                <button
+                  type="button"
+                  onClick={() => setModalOpen(false)}
+                  aria-label="Fechar"
+                  className={`p-1.5 rounded-lg cursor-pointer ${isDark ? 'hover:bg-white/10' : 'hover:bg-slate-100'}`}
+                >
+                  <X className="size-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                    Título da Tarefa
-                  </label>
+                  <label className={`text-[10px] font-bold uppercase tracking-widest ${soft}`}>O que fazer</label>
                   <input
-                    type="text"
-                    required
+                    autoFocus
                     value={newTitle}
                     onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="Ex: Criar carrossel sobre gatilhos mentais..."
-                    className={`w-full px-4 py-3 rounded-xl text-sm border outline-none ${
-                      isDark ? 'bg-white/5 border-white/10 text-slate-100 focus:border-primary' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-primary'
+                    placeholder="Ex: Criar carrossel do módulo 3"
+                    maxLength={300}
+                    className={`w-full mt-1.5 rounded-2xl p-3 text-sm outline-none border focus:border-primary/50 ${
+                      isDark ? 'bg-white/5 border-white/10 text-slate-100' : 'bg-slate-50 border-slate-200'
                     }`}
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      Categoria
-                    </label>
-                    <select
-                      value={newCategory}
-                      onChange={(e) => setNewCategory(e.target.value as any)}
-                      className={`w-full px-4 py-3 rounded-xl text-sm border outline-none ${
-                        isDark ? 'bg-[#1e1e24] border-white/10 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
-                      }`}
-                    >
-                      <option value="carrossel">Carrossel Canva</option>
-                      <option value="video">Vídeo / Reels</option>
-                      <option value="post">Post / Feed</option>
-                      <option value="story">Stories / Banner</option>
-                      <option value="marca">Identidade Visual</option>
-                      <option value="estudo">Estudo do Curso</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                      Prazo
-                    </label>
-                    <select
-                      value={newDueDate}
-                      onChange={(e) => setNewDueDate(e.target.value)}
-                      className={`w-full px-4 py-3 rounded-xl text-sm border outline-none ${
-                        isDark ? 'bg-[#1e1e24] border-white/10 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
-                      }`}
-                    >
-                      <option value="Hoje">Hoje</option>
-                      <option value="Amanhã">Amanhã</option>
-                      <option value="Esta Semana">Esta Semana</option>
-                      <option value="Próxima Semana">Próxima Semana</option>
-                    </select>
+                <div>
+                  <label className={`text-[10px] font-bold uppercase tracking-widest ${soft}`}>Categoria</label>
+                  <div className="flex flex-wrap gap-2 mt-1.5">
+                    {CATEGORIES.map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setNewCategory(c)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                          newCategory === c
+                            ? 'bg-primary text-white border-primary'
+                            : isDark
+                              ? 'bg-white/5 border-white/10 text-slate-300'
+                              : 'bg-white border-slate-200 text-slate-600'
+                        }`}
+                      >
+                        {c}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-3 pt-4 border-t border-white/5">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddModal(false)}
-                    className={`px-5 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
-                      isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-600 hover:text-slate-900'
+                {/* Prioridade: existia no código e nunca teve campo nem aparecia */}
+                <div>
+                  <label className={`text-[10px] font-bold uppercase tracking-widest ${soft}`}>Prioridade</label>
+                  <div className="flex gap-2 mt-1.5">
+                    {PRIORITIES.map((p) => (
+                      <button
+                        key={p.key}
+                        type="button"
+                        onClick={() => setNewPriority(p.key)}
+                        className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                          newPriority === p.key ? p.className : isDark ? 'bg-white/5 border-white/10 text-slate-400' : 'bg-white border-slate-200 text-slate-500'
+                        }`}
+                      >
+                        <Flag className="size-3.5" />
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Data real (antes era texto "Hoje"/"Amanhã" e nada vencia) */}
+                <div>
+                  <label className={`text-[10px] font-bold uppercase tracking-widest ${soft}`}>Prazo</label>
+                  <input
+                    type="date"
+                    value={newDue}
+                    onChange={(e) => setNewDue(e.target.value)}
+                    className={`w-full mt-1.5 rounded-2xl p-3 text-sm outline-none border focus:border-primary/50 ${
+                      isDark ? 'bg-white/5 border-white/10 text-slate-100' : 'bg-slate-50 border-slate-200'
                     }`}
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-6 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold uppercase tracking-wider shadow-md shadow-primary/20"
-                  >
-                    Salvar Tarefa
-                  </button>
+                  />
                 </div>
-              </form>
-            </motion.div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={saving || !newTitle.trim()}
+                className="w-full mt-6 py-3.5 rounded-2xl bg-primary text-white font-bold text-sm hover:bg-primary/90 transition-colors disabled:opacity-40 flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <CheckCircle2 className="size-4" />
+                {saving ? 'Salvando...' : 'Adicionar ao planner'}
+              </button>
+            </motion.form>
           </motion.div>
         )}
       </AnimatePresence>

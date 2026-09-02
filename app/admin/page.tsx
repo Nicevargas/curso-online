@@ -40,6 +40,8 @@ import {
 import Image from 'next/image';
 import Link from 'next/link';
 import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
+import { useSession } from '@/lib/SessionContext';
+import { useToast } from '@/components/ToastProvider';
 
 const DOCUMENTOS = [
   { arquivo: 'capitulo1 - workshop vergueiro.pdf',  nome: 'Capítulo 1',  link: 'https://drive.google.com/file/d/1tTAhVVUOlNV2uYKlsqQJiazJPfmDQWbK/view' },
@@ -70,6 +72,10 @@ interface ContentItem {
   media_url: string | null;
   url: string | null;
   created_at: string;
+  journey_id?: string | null;
+  dia?: number | null;
+  duracao?: string | null;
+  pdf_url?: string | null;
   is_favorite?: boolean;
 }
 
@@ -101,6 +107,14 @@ export default function AdminDashboardPage() {
   const [isPreviewStudentMode, setIsPreviewStudentMode] = useState(false);
   const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
 
+  const {
+    user: sessionUser,
+    profile: sessionProfile,
+    loading: sessionLoading,
+    isAdmin: sessionIsAdmin,
+  } = useSession();
+  const toast = useToast();
+
   // Form fields
   const [formData, setFormData] = useState({
     title: '',
@@ -108,10 +122,14 @@ export default function AdminDashboardPage() {
     archetype: 'Jornada',
     thumbnail_url: '',
     media_url: '',
-    url: ''
+    url: '',
+    journey_id: '',
+    dia: '',
+    duracao: '',
+    pdf_url: '',
   });
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; title: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [notification, setNotification] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Tabs state ('aulas' | 'indexar')
   const [activeTab, setActiveTab] = useState<'aulas' | 'indexar'>('aulas');
@@ -127,116 +145,90 @@ export default function AdminDashboardPage() {
     myCompletedLessons: 0
   });
 
-  const fetchAllData = useCallback(async (adminPrivileges: boolean = isAdmin, userId?: string) => {
+  // As aulas vivem na tabela `lessons` (é a que /jornada lê). Antes o admin gravava em
+  // `content` e nada do que era cadastrado aparecia para as alunas.
+  const fetchAllData = useCallback(async (adminPrivileges: boolean, userId?: string) => {
     try {
-      // 1. Fetch all content / lessons
-      const { data: contentData, error: contentError } = await supabase
-        .from('content')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const [lessonsRes, journeysRes] = await Promise.all([
+        supabase.from('lessons').select('*').order('dia', { ascending: true }).order('created_at', { ascending: false }),
+        supabase.from('journeys').select('*').order('title', { ascending: true }),
+      ]);
 
-      if (contentError) {
-        console.warn('Could not fetch from content table:', contentError);
-      } else if (contentData) {
-        setItems(contentData);
-      }
+      const journeysData = journeysRes.data || [];
+      const journeyById = new Map(journeysData.map((j: any) => [j.id, j]));
 
-      // 2. Fetch journeys
-      const { data: journeysData } = await supabase
-        .from('journeys')
-        .select('*')
-        .order('title', { ascending: true });
+      const mapped: ContentItem[] = (lessonsRes.data || []).map((l: any) => ({
+        id: l.id,
+        title: l.titulo || l.title || 'Sem título',
+        description: l.descricao || l.description || null,
+        archetype: journeyById.get(l.journey_id)?.title || l.archetype || 'Sem curso',
+        thumbnail_url: l.capa_url || l.thumbnail_url || null,
+        media_url: l.video_url || l.media_url || null,
+        url: l.video_url || l.url || null,
+        created_at: l.created_at || new Date().toISOString(),
+        journey_id: l.journey_id || null,
+        dia: l.dia ?? null,
+        duracao: l.duracao || null,
+        pdf_url: l.pdf_url || null,
+      }));
 
-      if (journeysData) {
-        setJourneys(journeysData);
-      }
+      if (lessonsRes.error) console.warn('Não foi possível ler as aulas:', lessonsRes.error.message);
+      setItems(mapped);
+      setJourneys(journeysData);
 
       let studentCount = 0;
       let userCompletedCount = 0;
 
       if (adminPrivileges) {
-        // Admin: fetch total count of students
-        const { count } = await supabase
-          .from('profiles')
-          .select('*', { count: 'exact', head: true });
+        const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
         studentCount = count || 0;
-      } else if (userId || user?.id) {
-        // Non-admin (Student): Only query own progress data
-        const currentUid = userId || user?.id;
+      } else if (userId) {
         const { count } = await supabase
-          .from('evolution_diary')
+          .from('lesson_progress')
           .select('*', { count: 'exact', head: true })
-          .eq('user_id', currentUid);
+          .eq('user_id', userId)
+          .eq('completed', true);
         userCompletedCount = count || 0;
       }
 
       setStats({
-        totalLessons: contentData?.length || 0,
-        totalJourneys: journeysData?.length || 0,
+        totalLessons: mapped.length,
+        totalJourneys: journeysData.length,
         totalStudents: studentCount,
-        myCompletedLessons: userCompletedCount
+        myCompletedLessons: userCompletedCount,
       });
     } catch (error) {
-      console.error('Error fetching admin data:', error);
+      console.error('Erro ao carregar dados do painel:', error);
     }
-  }, [isAdmin, user?.id]);
+  }, []);
 
+  // Sessão e perfil vêm do SessionProvider — antes este efeito dependia de `fetchAllData`
+  // (que dependia de `isAdmin`/`user`), então tudo rodava duas vezes a cada visita.
   useEffect(() => {
-    let isMounted = true;
-
-    async function checkAuthAndLoad() {
-      try {
-        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-        if (authError || !authUser) {
-          if (isMounted) window.location.href = '/login';
-          return;
-        }
-
-        if (isMounted) setUser(authUser);
-
-        // Check user role
-        const { data: userProfile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', authUser.id)
-          .maybeSingle();
-
-        const adminCheck = Boolean(
-          userProfile?.role === 'admin' || 
-          authUser.email?.toLowerCase().includes('admin') || 
-          authUser.email?.toLowerCase().includes('eunicelvargas@gmail.com')
-        );
-
-        if (isMounted) {
-          setProfile(userProfile);
-          setIsAdmin(adminCheck);
-        }
-
-        await fetchAllData(adminCheck, authUser.id);
-      } catch (err) {
-        console.error('Error initializing admin:', err);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
+    if (sessionLoading) return;
+    if (!sessionUser) {
+      window.location.href = '/login';
+      return;
     }
 
-    checkAuthAndLoad();
+    setUser(sessionUser);
+    setProfile(sessionProfile);
+    setIsAdmin(sessionIsAdmin);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
-        window.location.href = '/login';
-      }
-    });
+    let active = true;
+    (async () => {
+      await fetchAllData(sessionIsAdmin, sessionUser.id);
+      if (active) setLoading(false);
+    })();
 
     return () => {
-      isMounted = false;
-      subscription.unsubscribe();
+      active = false;
     };
-  }, [fetchAllData]);
+  }, [sessionLoading, sessionUser, sessionProfile, sessionIsAdmin, fetchAllData]);
 
   function showToast(text: string, type: 'success' | 'error' = 'success') {
-    setNotification({ type, text });
-    setTimeout(() => setNotification(null), 3500);
+    if (type === 'error') toast.error(text);
+    else toast.success(text);
   }
 
   function handleOpenCreateModal() {
@@ -251,7 +243,11 @@ export default function AdminDashboardPage() {
       archetype: journeys[0]?.archetype || 'Jornada',
       thumbnail_url: '',
       media_url: '',
-      url: ''
+      url: '',
+      journey_id: journeys[0]?.id || '',
+      dia: String((items.filter(i => i.journey_id === journeys[0]?.id).length || 0) + 1),
+      duracao: '',
+      pdf_url: '',
     });
     setIsModalOpen(true);
   }
@@ -268,7 +264,11 @@ export default function AdminDashboardPage() {
       archetype: item.archetype || 'Jornada',
       thumbnail_url: item.thumbnail_url || '',
       media_url: item.media_url || '',
-      url: item.url || ''
+      url: item.url || '',
+      journey_id: item.journey_id || journeys[0]?.id || '',
+      dia: item.dia != null ? String(item.dia) : '',
+      duracao: item.duracao || '',
+      pdf_url: item.pdf_url || '',
     });
     setIsModalOpen(true);
   }
@@ -276,92 +276,72 @@ export default function AdminDashboardPage() {
   async function handleSaveItem(e: React.FormEvent) {
     e.preventDefault();
     if (!isAdmin) {
-      showToast('Permissão negada. Apenas administradores podem salvar conteúdos.', 'error');
+      showToast('Apenas administradores podem salvar conteúdos.', 'error');
       return;
     }
     if (!formData.title.trim()) {
-      showToast('O título da aula/conteúdo é obrigatório', 'error');
+      showToast('O título da aula é obrigatório.', 'error');
+      return;
+    }
+    if (!formData.journey_id) {
+      showToast('Escolha o curso ao qual esta aula pertence.', 'error');
       return;
     }
 
     setIsSubmitting(true);
     try {
+      // Gravamos na tabela `lessons`, que é a que a página da aluna lê.
+      const record = {
+        titulo: formData.title.trim(),
+        descricao: formData.description || null,
+        capa_url: formData.thumbnail_url || null,
+        video_url: formData.media_url || formData.url || null,
+        pdf_url: formData.pdf_url || null,
+        duracao: formData.duracao || null,
+        dia: formData.dia ? Number(formData.dia) : null,
+        journey_id: formData.journey_id,
+      };
+
       if (editingItem) {
-        // UPDATE
-        const { error } = await supabase
-          .from('content')
-          .update({
-            title: formData.title,
-            description: formData.description,
-            archetype: formData.archetype,
-            thumbnail_url: formData.thumbnail_url || null,
-            media_url: formData.media_url || null,
-            url: formData.url || null,
-          })
-          .eq('id', editingItem.id);
-
+        const { error } = await supabase.from('lessons').update(record).eq('id', editingItem.id);
         if (error) throw error;
-
-        // Also update local list
-        setItems(prev => prev.map(i => i.id === editingItem.id ? { ...i, ...formData } : i));
-        showToast('Conteúdo atualizado com sucesso!');
+        showToast('Aula atualizada com sucesso!');
       } else {
-        // CREATE
-        const newRecord = {
-          title: formData.title,
-          description: formData.description,
-          archetype: formData.archetype,
-          thumbnail_url: formData.thumbnail_url || null,
-          media_url: formData.media_url || null,
-          url: formData.url || null,
-          created_at: new Date().toISOString()
-        };
-
-        const { data, error } = await supabase
-          .from('content')
-          .insert([newRecord])
-          .select()
-          .single();
-
+        const { error } = await supabase.from('lessons').insert([record]);
         if (error) throw error;
-
-        if (data) {
-          setItems(prev => [data, ...prev]);
-        }
-        showToast('Nova aula cadastrada com sucesso!');
+        showToast('Nova aula cadastrada! Já aparece para as alunas do curso.');
       }
 
       setIsModalOpen(false);
-      await fetchAllData();
+      await fetchAllData(isAdmin, user?.id);
     } catch (err: any) {
-      console.error('Error saving content:', err);
-      showToast(err.message || 'Erro ao salvar conteúdo.', 'error');
+      console.error('Erro ao salvar aula:', err);
+      showToast(err.message || 'Erro ao salvar a aula.', 'error');
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  async function handleDeleteItem(id: string, title: string) {
+  function handleDeleteItem(id: string, title: string) {
     if (!isAdmin) {
-      showToast('Permissão negada. Apenas administradores podem excluir conteúdos.', 'error');
+      showToast('Apenas administradores podem excluir conteúdos.', 'error');
       return;
     }
-    if (!confirm(`Tem certeza que deseja excluir a aula "${title}"?`)) return;
+    setConfirmDelete({ id, title });
+  }
 
+  async function confirmDeleteItem() {
+    if (!confirmDelete) return;
+    const { id } = confirmDelete;
+    setConfirmDelete(null);
     try {
-      const { error } = await supabase
-        .from('content')
-        .delete()
-        .eq('id', id);
-
+      const { error } = await supabase.from('lessons').delete().eq('id', id);
       if (error) throw error;
-
-      setItems(prev => prev.filter(i => i.id !== id));
-      showToast('Conteúdo excluído com sucesso.');
-      await fetchAllData();
+      setItems((prev) => prev.filter((i) => i.id !== id));
+      showToast('Aula excluída.');
     } catch (err: any) {
-      console.error('Error deleting item:', err);
-      showToast('Erro ao excluir conteúdo.', 'error');
+      console.error('Erro ao excluir aula:', err);
+      showToast('Erro ao excluir a aula.', 'error');
     }
   }
 
@@ -462,25 +442,6 @@ export default function AdminDashboardPage() {
       <Header />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
-        {/* Toast Alert */}
-        <AnimatePresence>
-          {notification && (
-            <motion.div
-              initial={{ opacity: 0, y: -20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className={`fixed top-20 right-4 z-50 p-4 rounded-2xl border shadow-2xl flex items-center gap-3 text-sm font-medium ${
-                notification.type === 'success'
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                  : 'bg-red-500/10 border-red-500/30 text-red-300'
-              }`}
-            >
-              {notification.type === 'success' ? <CheckCircle2 className="size-5 shrink-0" /> : <AlertCircle className="size-5 shrink-0" />}
-              <span>{notification.text}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* Top Breadcrumb & Controls */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-white/10">
           <div>
@@ -1053,21 +1014,52 @@ export default function AdminDashboardPage() {
                   />
                 </div>
 
-                {/* Archetype / Journey Module */}
+                {/* Curso ao qual a aula pertence */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    Módulo / Arquétipo
+                    Curso / Jornada *
                   </label>
-                  <input
-                    type="text"
-                    placeholder="Ex: Jornada, Boas-vindas, Desafio 1, Truques Pro..."
-                    value={formData.archetype}
-                    onChange={(e) => setFormData({ ...formData, archetype: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl p-3.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-primary/50"
-                  />
+                  <select
+                    value={formData.journey_id}
+                    onChange={(e) => setFormData({ ...formData, journey_id: e.target.value })}
+                    className="w-full bg-white/5 border border-white/10 rounded-2xl p-3.5 text-sm text-white focus:outline-none focus:border-primary/50"
+                  >
+                    <option value="" className="bg-[#0f0b15]">Selecione o curso...</option>
+                    {journeys.map((j) => (
+                      <option key={j.id} value={j.id} className="bg-[#0f0b15]">{j.title}</option>
+                    ))}
+                  </select>
                   <p className="text-[11px] text-slate-500">
-                    Dica: use o mesmo nome do arquétipo das jornadas para vincular as aulas aos módulos do aluno.
+                    A aula aparece na grade das alunas matriculadas neste curso.
                   </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Ordem (dia/módulo)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      placeholder="1"
+                      value={formData.dia}
+                      onChange={(e) => setFormData({ ...formData, dia: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-3.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-primary/50"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Duração
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ex: 12 min"
+                      value={formData.duracao}
+                      onChange={(e) => setFormData({ ...formData, duracao: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl p-3.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-primary/50"
+                    />
+                  </div>
                 </div>
 
                 {/* Video URL (Google Drive, Vimeo, YouTube ou MP4) */}
@@ -1106,8 +1098,8 @@ export default function AdminDashboardPage() {
                   <input
                     type="url"
                     placeholder="https://canva.com/design/... ou link de PDF"
-                    value={formData.url}
-                    onChange={(e) => setFormData({ ...formData, url: e.target.value })}
+                    value={formData.pdf_url}
+                    onChange={(e) => setFormData({ ...formData, pdf_url: e.target.value })}
                     className="w-full bg-white/5 border border-white/10 rounded-2xl p-3.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-primary/50 font-mono text-xs"
                   />
                 </div>
@@ -1182,6 +1174,49 @@ export default function AdminDashboardPage() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmação de exclusão (substitui o confirm() do navegador) */}
+      <AnimatePresence>
+        {confirmDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+            onClick={() => setConfirmDelete(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm rounded-3xl border border-white/10 bg-[#0f0b15] p-6 shadow-2xl"
+            >
+              <div className="size-12 rounded-2xl bg-red-500/15 border border-red-500/30 text-red-400 flex items-center justify-center mb-4">
+                <Trash2 className="size-6" />
+              </div>
+              <h3 className="text-lg font-bold font-display mb-2">Excluir esta aula?</h3>
+              <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+                “{confirmDelete.title}” será removida da grade das alunas. Esta ação não pode ser desfeita.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  className="flex-1 py-3 rounded-2xl bg-white/5 hover:bg-white/10 text-slate-300 text-sm font-bold transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmDeleteItem}
+                  className="flex-1 py-3 rounded-2xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors cursor-pointer"
+                >
+                  Excluir
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 

@@ -1,7 +1,8 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useSession } from '@/lib/SessionContext';
 
 export type ThemeMode = 'dark' | 'light';
 
@@ -17,84 +18,72 @@ const ThemeContext = createContext<ThemeContextType>({
   toggleTheme: () => {},
 });
 
+function applyTheme(mode: ThemeMode) {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  root.classList.toggle('dark', mode === 'dark');
+  root.classList.toggle('light', mode === 'light');
+  root.style.colorScheme = mode;
+}
+
+/**
+ * O tema vem do localStorage (aplicado antes do primeiro paint pelo script do layout)
+ * e é sincronizado com o perfil que o SessionProvider já carregou — sem uma segunda
+ * consulta ao Supabase e sem o flash escuro→claro que existia antes.
+ */
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const { user, profile } = useSession();
+  const syncedFor = useRef<string | null>(null);
+
   const [theme, setThemeState] = useState<ThemeMode>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('app_theme');
-      if (saved === 'light') return 'light';
-    }
+    if (typeof window !== 'undefined' && localStorage.getItem('app_theme') === 'light') return 'light';
     return 'dark';
   });
-
-  const applyTheme = (mode: ThemeMode) => {
-    if (typeof document !== 'undefined') {
-      const root = document.documentElement;
-      if (mode === 'dark') {
-        root.classList.add('dark');
-        root.classList.remove('light');
-      } else {
-        root.classList.remove('dark');
-        root.classList.add('light');
-      }
-    }
-  };
 
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
 
+  // Sincroniza uma vez com a preferência salva no perfil
   useEffect(() => {
-    async function loadUserTheme() {
+    if (!profile?.id || syncedFor.current === profile.id) return;
+    syncedFor.current = profile.id;
+
+    const saved = profile.theme;
+    if (saved === 'dark' || saved === 'light') {
+      setThemeState(saved);
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('theme')
-            .eq('id', user.id)
-            .maybeSingle();
-
-          if (profile?.theme && (profile.theme === 'dark' || profile.theme === 'light')) {
-            setThemeState(profile.theme as ThemeMode);
-            localStorage.setItem('app_theme', profile.theme);
-          }
-        }
-      } catch (err) {
-        console.warn('Could not sync user theme from profile:', err);
-      }
+        localStorage.setItem('app_theme', saved);
+      } catch {}
     }
+  }, [profile?.id, profile?.theme]);
 
-    loadUserTheme();
-  }, []);
+  const setTheme = useCallback(
+    (newTheme: ThemeMode) => {
+      setThemeState(newTheme);
+      applyTheme(newTheme);
+      try {
+        localStorage.setItem('app_theme', newTheme);
+      } catch {}
 
-  const setTheme = async (newTheme: ThemeMode) => {
-    setThemeState(newTheme);
-    applyTheme(newTheme);
-    localStorage.setItem('app_theme', newTheme);
-
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase
+      if (user?.id) {
+        supabase
           .from('profiles')
           .update({ theme: newTheme })
-          .eq('id', user.id);
+          .eq('id', user.id)
+          .then(({ error }) => {
+            if (error) console.warn('Não foi possível salvar o tema no perfil:', error.message);
+          });
       }
-    } catch (err) {
-      console.warn('Error saving theme preference to profile:', err);
-    }
-  };
-
-  const toggleTheme = () => {
-    const next = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-  };
-
-  return (
-    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
-      {children}
-    </ThemeContext.Provider>
+    },
+    [user?.id]
   );
+
+  const toggleTheme = useCallback(() => {
+    setTheme(theme === 'dark' ? 'light' : 'dark');
+  }, [theme, setTheme]);
+
+  return <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme() {

@@ -19,162 +19,99 @@ import {
 } from '@/lib/businessSheet';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/lib/ThemeContext';
+import { useBusinessSheet } from '@/lib/useBusinessSheet';
+import { useToast } from '@/components/ToastProvider';
 
 interface BusinessSheetModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialTab?: 'form' | 'example' | 'map' | 'prompt';
+  /** 'modal' abre em diálogo; 'page' renderiza embutido na página /ficha. */
+  variant?: 'modal' | 'page';
 }
 
-export default function BusinessSheetModal({ isOpen, onClose, initialTab = 'form' }: BusinessSheetModalProps) {
+export default function BusinessSheetModal({ isOpen, onClose, initialTab = 'form', variant = 'modal' }: BusinessSheetModalProps) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
+  const toast = useToast();
+  const isPage = variant === 'page';
+  const active = isPage || isOpen;
+
   const [tab, setTab] = useState<'form' | 'example' | 'map' | 'prompt'>(initialTab);
-  const [formData, setFormData] = useState<BusinessSheetData>(EMPTY_BUSINESS_SHEET);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
-  const [loading, setLoading] = useState(true);
 
-  // Sync initial tab if prop changes
+  const {
+    formData,
+    loading,
+    saveState,
+    savedAt,
+    error,
+    save,
+    updateField: handleFieldChange,
+    updateColor: handleColorChange,
+    copyPrompt,
+    completeness,
+    filledCount,
+    totalFields,
+  } = useBusinessSheet(active);
+
+  const saving = saveState === 'saving';
+  const saveSuccess = saveState === 'saved';
+
   useEffect(() => {
-    if (isOpen) {
-      setTab(initialTab);
-    }
-  }, [isOpen, initialTab]);
+    if (active) setTab(initialTab);
+  }, [active, initialTab]);
 
-  // Load user data
+  // Fecha com Esc e trava a rolagem do fundo (o modal não fazia nem um nem outro)
   useEffect(() => {
-    if (!isOpen) return;
-
-    let isMounted = true;
-
-    async function loadData() {
-      setLoading(true);
-      // 1. First get local storage for instant render
-      const local = getLocalBusinessSheet();
-      if (isMounted) setFormData(local);
-
-      // 2. Fetch from Supabase
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user && isMounted) {
-          setUserId(user.id);
-          
-          // Tenta canva_business_sheets primeiro
-          let { data: serverSheet } = await supabase
-            .from('canva_business_sheets')
-            .select('*')
-            .eq('user_id', user.id)
-            .maybeSingle();
-
-          if (!serverSheet) {
-            const fallback = await supabase
-              .from('business_sheets')
-              .select('*')
-              .eq('user_id', user.id)
-              .maybeSingle();
-            if (fallback.data) {
-              serverSheet = fallback.data;
-            }
-          }
-
-          if (serverSheet && isMounted) {
-            const merged: BusinessSheetData = {
-              business_name: serverSheet.business_name || local.business_name || '',
-              segment: serverSheet.segment || local.segment || '',
-              what_you_sell: serverSheet.what_you_sell || local.what_you_sell || '',
-              target_audience: serverSheet.target_audience || local.target_audience || '',
-              main_benefit: serverSheet.main_benefit || local.main_benefit || '',
-              tone_of_voice: serverSheet.tone_of_voice || local.tone_of_voice || 'Amigável',
-              brand_colors: Array.isArray(serverSheet.brand_colors) && serverSheet.brand_colors.length > 0 
-                ? serverSheet.brand_colors 
-                : local.brand_colors || EMPTY_BUSINESS_SHEET.brand_colors,
-              contact_channel: serverSheet.contact_channel || local.contact_channel || 'WhatsApp',
-            };
-            setFormData(merged);
-            saveLocalBusinessSheet(merged);
-          }
-        }
-      } catch (err) {
-        console.warn('Erro ao carregar ficha do servidor:', err);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    }
-
-    loadData();
-
-    return () => {
-      isMounted = false;
+    if (!isOpen || isPage) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
     };
-  }, [isOpen]);
+    document.addEventListener('keydown', onKey);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isOpen, isPage, onClose]);
 
-  const handleFieldChange = (field: keyof BusinessSheetData, value: any) => {
-    const updated = { ...formData, [field]: value };
-    setFormData(updated);
-    saveLocalBusinessSheet(updated);
-  };
-
-  const handleColorChange = (index: number, key: 'name' | 'hex', value: string) => {
-    const updatedColors = [...formData.brand_colors];
-    if (!updatedColors[index]) {
-      updatedColors[index] = { name: '', hex: '#7311D4' };
-    }
-    updatedColors[index] = { ...updatedColors[index], [key]: value };
-    handleFieldChange('brand_colors', updatedColors);
-  };
+  useEffect(() => {
+    if (error) toast.error('Não foi possível salvar sua ficha.', error);
+  }, [error, toast]);
 
   const handleSave = async () => {
-    setSaving(true);
-    saveLocalBusinessSheet(formData);
-
-    try {
-      if (userId) {
-        // Attempt saving via API or direct supabase
-        await fetch('/api/ficha', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, data: formData }),
-        });
-      }
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-    } catch (e) {
-      console.warn('Salvo localmente:', e);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-    } finally {
-      setSaving(false);
-    }
+    const ok = await save();
+    if (ok) toast.success('Ficha salva!');
   };
 
-  const handleCopyPrompt = () => {
-    const promptText = generatePromptBlock(formData);
-    navigator.clipboard.writeText(promptText);
-    setCopiedPrompt(true);
-    setTimeout(() => setCopiedPrompt(false), 2500);
+  const handleCopyPrompt = async () => {
+    const ok = await copyPrompt();
+    if (ok) {
+      setCopiedPrompt(true);
+      setTimeout(() => setCopiedPrompt(false), 2500);
+    } else {
+      toast.error('Não foi possível copiar. Selecione o texto e use Ctrl+C.');
+    }
   };
 
   const handlePrint = () => {
     window.print();
   };
 
-  if (!isOpen) return null;
-
-  return (
-    <AnimatePresence>
-      <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 overflow-y-auto bg-black/80 backdrop-blur-md">
+  const panel = (
         <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: 10 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: 10 }}
+          initial={isPage ? false : { opacity: 0, scale: 0.95, y: 10 }}
+          animate={isPage ? undefined : { opacity: 1, scale: 1, y: 0 }}
+          exit={isPage ? undefined : { opacity: 0, scale: 0.95, y: 10 }}
           transition={{ duration: 0.2 }}
-          className={`relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-3xl overflow-hidden shadow-2xl border ${
-            isDark 
-              ? 'bg-[#121118] border-white/10 text-slate-100' 
+          className={`print-area relative w-full ${
+            isPage ? 'max-w-4xl mx-auto' : 'max-w-4xl max-h-[90vh]'
+          } flex flex-col rounded-3xl overflow-hidden shadow-2xl border ${
+            isDark
+              ? 'bg-[#121118] border-white/10 text-slate-100'
               : 'bg-white border-slate-200 text-slate-900'
           }`}
           onClick={(e) => e.stopPropagation()}
@@ -267,8 +204,42 @@ export default function BusinessSheetModal({ isOpen, onClose, initialTab = 'form
             </button>
           </div>
 
+          {/* Completude e auto-save */}
+          <div className={`px-4 sm:px-6 py-3 border-b flex flex-wrap items-center gap-3 ${
+            isDark ? 'border-white/10' : 'border-slate-200'
+          }`}>
+            <div className="flex-1 min-w-[180px]">
+              <div className="flex items-center justify-between text-[11px] font-bold mb-1.5">
+                <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
+                  {filledCount} de {totalFields} campos preenchidos
+                </span>
+                <span className="text-primary font-mono">{completeness}%</span>
+              </div>
+              <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${completeness}%` }}
+                  transition={{ duration: 0.5 }}
+                  className="h-full rounded-full bg-gradient-to-r from-primary to-accent-gold"
+                />
+              </div>
+            </div>
+
+            <span className={`text-[11px] font-semibold shrink-0 ${
+              saveState === 'error' ? 'text-red-400' : isDark ? 'text-slate-400' : 'text-slate-500'
+            }`}>
+              {saveState === 'saving'
+                ? 'Salvando...'
+                : saveState === 'error'
+                  ? 'Erro ao salvar'
+                  : savedAt
+                    ? `Salvo às ${savedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                    : 'Salva sozinho enquanto você digita'}
+            </span>
+          </div>
+
           {/* Body Content */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+          <div className={`flex-1 p-4 sm:p-6 space-y-6 ${isPage ? '' : 'overflow-y-auto'}`}>
             {/* Tab: Form */}
             {tab === 'form' && (
               <div className="space-y-6">
@@ -720,7 +691,23 @@ export default function BusinessSheetModal({ isOpen, onClose, initialTab = 'form
             )}
           </div>
         </motion.div>
-      </div>
+  );
+
+  if (isPage) return panel;
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center p-3 sm:p-6 overflow-y-auto bg-black/80 backdrop-blur-md"
+          onClick={onClose}
+        >
+          {panel}
+        </motion.div>
+      )}
     </AnimatePresence>
   );
 }

@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabaseServer';
+import { getUserFromRequest } from '@/lib/apiAuth';
 
 export const runtime = 'nodejs';
 
+/**
+ * A ficha é sempre lida/gravada para o usuário DO TOKEN, nunca para um `userId`
+ * enviado no corpo — antes qualquer pessoa podia sobrescrever a ficha de outra aluna.
+ */
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
-
-    if (!userId) {
-      return NextResponse.json({ error: 'ID do usuário é obrigatório' }, { status: 400 });
+    const user = await getUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
 
     let supabaseAdmin;
@@ -19,23 +22,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ sheet: null, notice: 'Supabase admin não configurado' });
     }
 
-    // Tenta primeiro em canva_business_sheets
-    let { data, error } = await supabaseAdmin
+    let { data } = await supabaseAdmin
       .from('canva_business_sheets')
       .select('*')
-      .eq('user_id', userId)
+      .eq('user_id', user.id)
       .maybeSingle();
 
     if (!data) {
-      // Fallback para business_sheets
       const fallback = await supabaseAdmin
         .from('business_sheets')
         .select('*')
-        .eq('user_id', userId)
+        .eq('user_id', user.id)
         .maybeSingle();
-      if (fallback.data) {
-        data = fallback.data;
-      }
+      if (fallback.data) data = fallback.data;
     }
 
     return NextResponse.json({ sheet: data });
@@ -46,10 +45,14 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { userId, data } = body;
+    const user = await getUserFromRequest(req);
+    if (!user) {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    }
 
-    if (!userId || !data) {
+    const body = await req.json();
+    const data = body?.data;
+    if (!data) {
       return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 });
     }
 
@@ -57,11 +60,11 @@ export async function POST(req: NextRequest) {
     try {
       supabaseAdmin = getSupabaseAdmin();
     } catch {
-      return NextResponse.json({ success: true, savedOffline: true });
+      return NextResponse.json({ error: 'Armazenamento indisponível no servidor.' }, { status: 500 });
     }
 
     const payload = {
-      user_id: userId,
+      user_id: user.id,
       course_slug: 'canva-com-ia-2-0',
       business_name: data.business_name || '',
       segment: data.segment || '',
@@ -74,19 +77,17 @@ export async function POST(req: NextRequest) {
       updated_at: new Date().toISOString(),
     };
 
-    // Salva em canva_business_sheets
     const { error: canvaErr } = await supabaseAdmin
       .from('canva_business_sheets')
       .upsert(payload, { onConflict: 'user_id' });
 
-    // Salva também em business_sheets para compatibilidade
     const { error: legacyErr } = await supabaseAdmin
       .from('business_sheets')
       .upsert(payload, { onConflict: 'user_id' });
 
     if (canvaErr && legacyErr) {
-      console.warn('Aviso ao salvar ficha:', canvaErr.message);
-      return NextResponse.json({ success: false, error: canvaErr.message }, { status: 500 });
+      console.error('Erro ao salvar ficha:', canvaErr.message);
+      return NextResponse.json({ error: canvaErr.message }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, data: payload });

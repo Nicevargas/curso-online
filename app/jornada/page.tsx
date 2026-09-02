@@ -1,362 +1,309 @@
 'use client';
 
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import Image from 'next/image';
+import { AnimatePresence, motion } from 'motion/react';
+import {
+  BookOpen,
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  FileText,
+  Lock,
+  Play,
+  Search,
+  Sparkles,
+  Trophy,
+  X,
+  Zap,
+} from 'lucide-react';
+
 import Header from '@/components/Header';
 import BottomNav from '@/components/BottomNav';
 import EvolutionDiary from '@/components/EvolutionDiary';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Sparkles, 
-  CheckCircle2, 
-  Circle, 
-  Clock, 
-  Users as UsersIcon, 
-  Play, 
-  FileText, 
-  X, 
-  Calendar, 
-  ClipboardList, 
-  BookOpen, 
-  Lock, 
-  ChevronRight, 
-  GraduationCap,
-  Layers,
-  Zap
-} from 'lucide-react';
-import { useEffect, useState, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import Image from 'next/image';
-import Link from 'next/link';
-import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
-import { updateUserGamification } from '@/lib/gamification';
-import { useTheme } from '@/lib/ThemeContext';
 import BusinessSheetModal from '@/components/BusinessSheetModal';
-import { 
-  CourseWithAccess, 
-  getCoursesWithUserAccess, 
-  switchActiveCourse, 
-  enrollUser, 
-  DEFAULT_JOURNEY_ID 
+import { supabase } from '@/lib/supabase';
+import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
+import { useTheme } from '@/lib/ThemeContext';
+import { useSession } from '@/lib/SessionContext';
+import { useToast } from '@/components/ToastProvider';
+import { toggleLessonCompletion } from '@/lib/gamification';
+import {
+  CourseWithAccess,
+  CourseLesson,
+  getCoursesWithUserAccess,
+  getCourseLessons,
+  switchActiveCourse,
+  enrollUser,
+  DEFAULT_JOURNEY_ID,
 } from '@/lib/courses';
 
-interface Challenge {
-  id: string;
-  title: string;
-  thumbnail_url: string | null;
-  description: string | null;
-  media_url: string | null;
-  url: string | null;
-  created_at: string;
-}
-
-interface DiaryEntry {
-  id: string;
-  content: string;
-  mood: string;
-  created_at: string;
+function LessonSkeleton() {
+  return (
+    <div className="space-y-3">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="flex gap-4 animate-pulse">
+          <div className="size-10 rounded-full bg-slate-500/20 shrink-0" />
+          <div className="flex-1 h-20 rounded-2xl bg-slate-500/10" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function JornadaPageInner() {
   const searchParams = useSearchParams();
   const cursoParam = searchParams.get('curso');
   const { theme } = useTheme();
+  const { user, profile, loading: sessionLoading } = useSession();
+  const toast = useToast();
   const isDark = theme === 'dark';
 
-  const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<any>(null);
-  
-  // Courses state
   const [allCourses, setAllCourses] = useState<CourseWithAccess[]>([]);
   const [enrolledCourses, setEnrolledCourses] = useState<CourseWithAccess[]>([]);
-  const [selectedCourseId, setSelectedCourseId] = useState<string>(DEFAULT_JOURNEY_ID);
   const [selectedCourse, setSelectedCourse] = useState<CourseWithAccess | null>(null);
 
-  // Content / Challenges state
-  const [challenges, setChallenges] = useState<Challenge[]>([]);
-  const [diaryEntries, setDiaryEntries] = useState<DiaryEntry[]>([]);
+  const [lessons, setLessons] = useState<CourseLesson[]>([]);
   const [completedItems, setCompletedItems] = useState<Set<string>>(new Set());
+  const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(true);
-  const [challengesLoading, setChallengesLoading] = useState(false);
-  const [activeVideo, setActiveVideo] = useState<Challenge | null>(null);
-  const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
-  const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const [lessonsLoading, setLessonsLoading] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
+  const [search, setSearch] = useState('');
+  const [activeVideo, setActiveVideo] = useState<CourseLesson | null>(null);
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const [courseDoneOpen, setCourseDoneOpen] = useState(false);
 
-  // Load course lessons / challenges
-  const loadChallengesForCourse = async (userId: string, course: CourseWithAccess) => {
-    setChallengesLoading(true);
-    try {
-      // 1. Check user progress
-      const { data: progress } = await supabase
-        .from('lesson_progress')
-        .select('lesson_id')
-        .eq('user_id', userId)
-        .eq('completed', true);
-      
-      const completedIds = new Set(progress?.map(p => p.lesson_id) || []);
-      setCompletedItems(completedIds);
-
-      // 2. Fetch from 'lessons' table for this specific journey_id
-      const { data: lessonsData } = await supabase
-        .from('lessons')
-        .select('*')
-        .eq('journey_id', course.id)
-        .order('dia', { ascending: true })
-        .order('created_at', { ascending: true });
-
-      if (lessonsData && lessonsData.length > 0) {
-        const formatted: Challenge[] = lessonsData.map(l => ({
-          id: l.id,
-          title: l.titulo,
-          description: l.descricao,
-          thumbnail_url: l.capa_url,
-          media_url: l.video_url,
-          url: l.video_url,
-          created_at: l.created_at || new Date().toISOString()
-        }));
-        setChallenges(formatted);
-        const firstUncompleted = formatted.find(c => !completedIds.has(c.id)) || formatted[0];
-        setSelectedChallengeId(firstUncompleted?.id || null);
-        setChallengesLoading(false);
-        return;
-      }
-
-      // 3. Fetch from 'content' table by archetype
-      const { data: contentData } = await supabase
-        .from('content')
-        .select('id, title, thumbnail_url, description, media_url, url, created_at')
-        .eq('archetype', course.archetype || 'Jornada')
-        .order('created_at', { ascending: true });
-
-      if (contentData && contentData.length > 0) {
-        setChallenges(contentData);
-        const firstUncompleted = contentData.find(c => !completedIds.has(c.id)) || contentData[0];
-        setSelectedChallengeId(firstUncompleted?.id || null);
-      } else {
-        setChallenges([]);
-        setSelectedChallengeId(null);
-      }
-    } catch (err) {
-      console.error('Erro ao carregar desafios do curso:', err);
-      setChallenges([]);
-    } finally {
-      setChallengesLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function checkAuthAndFetchData() {
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-      if (authError || !authUser) {
-        if (isMounted) window.location.href = '/login';
-        return;
-      }
-      if (isMounted) setUser(authUser);
-
+  // ---------- Carregar aulas do curso ----------
+  const loadLessons = useCallback(
+    async (userId: string, course: CourseWithAccess) => {
+      setLessonsLoading(true);
       try {
-        // Fetch user profile
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('role, level, journey_id')
-          .eq('id', authUser.id)
-          .maybeSingle();
+        const [lessonData, { data: progress }] = await Promise.all([
+          getCourseLessons(course),
+          supabase.from('lesson_progress').select('lesson_id').eq('user_id', userId).eq('completed', true),
+        ]);
 
-        if (isMounted && profileData) {
-          setProfile(profileData);
-        }
+        const completed = new Set<string>((progress || []).map((p: any) => p.lesson_id));
+        setCompletedItems(completed);
+        setLessons(lessonData);
 
-        // Prioridade: curso vindo da URL (/jornada?curso=ID) > último curso ativo > perfil > padrão
-        const storedJourneyId = typeof window !== 'undefined' ? localStorage.getItem('active_journey_id') : null;
-        const initialCourseId = cursoParam || storedJourneyId || profileData?.journey_id || DEFAULT_JOURNEY_ID;
-
-        // Fetch all courses with access
-        const { allCourses: courses, enrolledCourses: enrolled } = await getCoursesWithUserAccess(authUser.id);
-        
-        if (isMounted) {
-          setAllCourses(courses);
-          setEnrolledCourses(enrolled);
-          setSelectedCourseId(initialCourseId);
-
-          const current = courses.find(c => c.id === initialCourseId) || enrolled[0] || courses[0];
-          setSelectedCourse(current || null);
-
-          if (current && current.isEnrolled) {
-            if (cursoParam && current.id === cursoParam) {
-              await switchActiveCourse(authUser.id, current.id);
-            }
-            await loadChallengesForCourse(authUser.id, current);
-          }
-        }
-
-        // Fetch Diary Entries
-        const { data: diaryData, error: diaryError } = await supabase
-          .from('diary_entries')
-          .select('id, content, mood, created_at')
-          .eq('user_id', authUser.id)
-          .order('created_at', { ascending: false });
-
-        if (isMounted && diaryData && !diaryError) {
-          setDiaryEntries(diaryData);
-        }
+        const next = lessonData.find((l) => !completed.has(l.id)) || lessonData[0];
+        setSelectedLessonId(next?.id || null);
       } catch (err) {
-        console.error('Error fetching jornada data:', err);
+        console.error('Erro ao carregar aulas:', err);
+        setLessons([]);
       } finally {
-        if (isMounted) setLoading(false);
+        setLessonsLoading(false);
       }
+    },
+    []
+  );
+
+  // ---------- Inicialização (uma vez; antes rodava duas vezes) ----------
+  useEffect(() => {
+    if (sessionLoading) return;
+    if (!user) {
+      window.location.href = '/login';
+      return;
     }
 
-    checkAuthAndFetchData();
+    let active = true;
 
-    // Setup realtime subscription for diary entries
-    const diarySubscription = supabase
-      .channel('public:diary_entries')
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'diary_entries' 
-      }, (payload) => {
-        if (payload.new && payload.new.user_id === user?.id) {
-          setDiaryEntries(prev => [payload.new as DiaryEntry, ...prev]);
-        }
-      })
-      .subscribe();
+    (async () => {
+      const { allCourses: courses, enrolledCourses: enrolled } = await getCoursesWithUserAccess(user.id);
+      if (!active) return;
+
+      setAllCourses(courses);
+      setEnrolledCourses(enrolled);
+
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('active_journey_id') : null;
+      const wantedId = cursoParam || stored || profile?.journey_id || DEFAULT_JOURNEY_ID;
+      const current = courses.find((c) => c.id === wantedId) || enrolled[0] || courses[0] || null;
+
+      setSelectedCourse(current);
+      setLoading(false);
+
+      if (current?.isEnrolled) {
+        if (cursoParam && current.id === cursoParam) switchActiveCourse(user.id, current.id);
+        await loadLessons(user.id, current);
+      }
+    })();
 
     return () => {
-      isMounted = false;
-      supabase.removeChannel(diarySubscription);
+      active = false;
     };
-  }, [user?.id, cursoParam]);
+  }, [sessionLoading, user, profile?.journey_id, cursoParam, loadLessons]);
 
+  // ---------- Ações ----------
   const handleSelectCourse = async (course: CourseWithAccess) => {
     if (!user) return;
-    setSelectedCourseId(course.id);
     setSelectedCourse(course);
+    setSearch('');
     if (course.isEnrolled) {
-      await switchActiveCourse(user.id, course.id);
-      await loadChallengesForCourse(user.id, course);
+      switchActiveCourse(user.id, course.id);
+      await loadLessons(user.id, course);
+    } else {
+      setLessons([]);
     }
   };
 
-  const handleEnrollInSelected = async () => {
+  const handleEnroll = async () => {
     if (!user || !selectedCourse) return;
     setEnrolling(true);
-    const success = await enrollUser(user.id, selectedCourse.id);
-    if (success) {
+    const ok = await enrollUser(user.id, selectedCourse.id);
+    if (ok) {
       const { allCourses: courses, enrolledCourses: enrolled } = await getCoursesWithUserAccess(user.id);
       setAllCourses(courses);
       setEnrolledCourses(enrolled);
-      const updated = courses.find(c => c.id === selectedCourse.id);
+      const updated = courses.find((c) => c.id === selectedCourse.id);
       if (updated) {
         setSelectedCourse(updated);
-        await loadChallengesForCourse(user.id, updated);
+        await loadLessons(user.id, updated);
       }
+      toast.success('Acesso liberado!', 'Bons estudos.');
+    } else {
+      toast.error(
+        'Não foi possível liberar o acesso automaticamente.',
+        'Fale com a administração para ativar este curso na sua conta.'
+      );
     }
     setEnrolling(false);
   };
 
-  const handleToggleComplete = async (e: React.MouseEvent, itemId: string) => {
-    e.stopPropagation();
+  const handleToggleComplete = async (lessonId: string) => {
     if (!user) return;
 
-    const isCompleted = completedItems.has(itemId);
-    const newCompleted = new Set(completedItems);
-    
-    if (isCompleted) {
-      newCompleted.delete(itemId);
-    } else {
-      newCompleted.add(itemId);
-    }
-    
-    setCompletedItems(newCompleted);
+    const wasCompleted = completedItems.has(lessonId);
+    const next = new Set(completedItems);
+    if (wasCompleted) next.delete(lessonId);
+    else next.add(lessonId);
+    setCompletedItems(next); // atualização otimista
 
-    try {
-      if (isCompleted) {
-        const { error: deleteError } = await supabase
-          .from('lesson_progress')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('lesson_id', itemId);
-        
-        if (deleteError) throw deleteError;
-        await updateUserGamification(user.id, false);
+    const result = await toggleLessonCompletion(user.id, lessonId, !wasCompleted);
+
+    if (!result) {
+      setCompletedItems(completedItems); // desfaz
+      toast.error('Não foi possível salvar seu progresso.');
+      return;
+    }
+
+    if (!wasCompleted) {
+      const finishedCourse = lessons.length > 0 && next.size >= lessons.length;
+
+      if (finishedCourse) {
+        toast.celebrate('big');
+        setCourseDoneOpen(true);
       } else {
-        const { error: upsertError } = await supabase
-          .from('lesson_progress')
-          .upsert({
-            user_id: user.id,
-            lesson_id: itemId,
-            completed: true
-          });
-        
-        if (upsertError) throw upsertError;
-        await updateUserGamification(user.id, true);
+        toast.celebrate();
+        toast.reward(
+          result.pointsDelta > 0 ? `+${result.pointsDelta} pontos!` : 'Aula concluída!',
+          result.leveledUp
+            ? `Você chegou ao nível ${result.level}! 🎉`
+            : `${next.size} de ${lessons.length} aulas concluídas`
+        );
+
+        // Avança automaticamente para a próxima aula não concluída
+        const idx = lessons.findIndex((l) => l.id === lessonId);
+        const following = lessons.slice(idx + 1).find((l) => !next.has(l.id));
+        if (following) setSelectedLessonId(following.id);
       }
-    } catch (err) {
-      console.error('Error toggling completion:', err);
-      setCompletedItems(completedItems);
     }
   };
 
-  const isCanvaCourse = selectedCourse?.archetype === 'Jornada' || selectedCourse?.title.toLowerCase().includes('canva');
+  // ---------- Derivados ----------
+  const currentLesson = useMemo(
+    () => lessons.find((l) => l.id === selectedLessonId) || lessons[0] || null,
+    [lessons, selectedLessonId]
+  );
 
-  if (loading) {
-    return (
-      <main className={`min-h-screen flex items-center justify-center ${
-        isDark ? 'bg-[#000000]' : 'bg-[#f7f6f8]'
-      }`}>
-        <motion.div 
-          animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-          className="size-8 border-2 border-primary border-t-transparent rounded-full"
-        />
-      </main>
+  const currentIndex = useMemo(
+    () => lessons.findIndex((l) => l.id === currentLesson?.id),
+    [lessons, currentLesson?.id]
+  );
+
+  const filteredLessons = useMemo(() => {
+    if (!search.trim()) return lessons;
+    const q = search.toLowerCase();
+    return lessons.filter(
+      (l) => l.title.toLowerCase().includes(q) || (l.description || '').toLowerCase().includes(q)
     );
-  }
+  }, [lessons, search]);
 
+  const completedCount = useMemo(
+    () => lessons.filter((l) => completedItems.has(l.id)).length,
+    [lessons, completedItems]
+  );
+  const progressPercent = lessons.length > 0 ? Math.round((completedCount / lessons.length) * 100) : 0;
+
+  const isCanvaCourse =
+    selectedCourse?.archetype === 'Jornada' || Boolean(selectedCourse?.title?.toLowerCase().includes('canva'));
+
+  const card = isDark ? 'bg-white/[0.03] border-white/10' : 'bg-white border-slate-200 shadow-sm';
+  const soft = isDark ? 'text-slate-400' : 'text-slate-600';
+
+  // ---------- Render ----------
   return (
-    <main className={`min-h-screen relative pb-24 transition-colors duration-200 ${
-      isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'
-    }`}>
+    <main
+      className={`min-h-screen relative pb-28 transition-colors duration-200 ${
+        isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'
+      }`}
+    >
       <Header />
-      
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        
-        {/* Course Switcher / Navigation Header */}
-        <section className="mb-8">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="px-2.5 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] font-extrabold uppercase tracking-widest font-mono">
-                  JORNADA DE ESTUDOS
-                </span>
-                <span className="text-xs text-slate-500">•</span>
-                <span className="text-xs font-bold text-slate-400">
-                  {selectedCourse?.title || 'Curso Selecionado'}
-                </span>
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-bold font-display tracking-tight">
-                Módulos & Desafios Práticos
-              </h1>
-            </div>
 
-            {/* Quick Link to Home */}
-            <Link 
-              href="/" 
-              className="text-xs font-bold text-primary hover:underline flex items-center gap-1 shrink-0"
-            >
-              <span>Voltar ao Painel Geral</span>
-              <ChevronRight className="size-4" />
+      <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8">
+        {/* Cabeçalho + progresso do curso */}
+        <section className={`rounded-3xl border p-5 sm:p-6 mb-6 ${card}`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+            <div className="min-w-0">
+              <span className="px-2.5 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] font-extrabold uppercase tracking-widest font-mono">
+                Jornada de estudos
+              </span>
+              <h1 className="text-2xl sm:text-3xl font-bold font-display tracking-tight mt-2 truncate">
+                {selectedCourse?.title || 'Seus módulos'}
+              </h1>
+              {selectedCourse?.isEnrolled && lessons.length > 0 && (
+                <p className={`text-sm mt-1 ${soft}`}>
+                  {progressPercent === 100
+                    ? 'Você concluiu todas as aulas deste curso. Parabéns! 🎉'
+                    : `Continue de onde parou — faltam ${lessons.length - completedCount} aulas.`}
+                </p>
+              )}
+            </div>
+            <Link href="/" className="text-xs font-bold text-primary hover:underline flex items-center gap-1 shrink-0">
+              Painel geral <ChevronRight className="size-4" />
             </Link>
           </div>
 
-          {/* Course Tabs (Enrolled & Available) */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+          {/* Barra de progresso — o dado existia e nunca era mostrado */}
+          {selectedCourse?.isEnrolled && lessons.length > 0 && (
+            <div className="mb-5">
+              <div className="flex items-center justify-between text-xs font-bold mb-2">
+                <span className={soft}>
+                  {completedCount} de {lessons.length} aulas concluídas
+                </span>
+                <span className="text-primary font-mono">{progressPercent}%</span>
+              </div>
+              <div className="w-full h-2.5 rounded-full bg-white/10 overflow-hidden">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${progressPercent}%` }}
+                  transition={{ duration: 0.7, ease: 'easeOut' }}
+                  className="h-full rounded-full bg-gradient-to-r from-primary to-accent-purple"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Abas de curso */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
             {allCourses.map((c) => {
-              const isSelected = c.id === selectedCourseId;
+              const isSelected = c.id === selectedCourse?.id;
               return (
                 <button
                   key={c.id}
@@ -365,20 +312,18 @@ function JornadaPageInner() {
                     isSelected
                       ? 'bg-primary text-white border-primary shadow-md shadow-primary/20'
                       : isDark
-                        ? 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10 hover:text-white'
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 shadow-sm'
+                        ? 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
                   }`}
                 >
-                  {c.isEnrolled ? (
-                    <BookOpen className="size-3.5" />
-                  ) : (
-                    <Lock className="size-3.5 text-amber-400" />
-                  )}
-                  <span className="truncate max-w-[200px]">{c.title}</span>
+                  {c.isEnrolled ? <BookOpen className="size-3.5" /> : <Lock className="size-3.5 text-amber-400" />}
+                  <span className="truncate max-w-[180px]">{c.title}</span>
                   {c.isEnrolled && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${
-                      isSelected ? 'bg-white/20 text-white' : 'bg-black/10 dark:bg-white/10 text-slate-400'
-                    }`}>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-md ${
+                        isSelected ? 'bg-white/20' : 'bg-black/10 dark:bg-white/10 text-slate-400'
+                      }`}
+                    >
                       {c.progressPercent}%
                     </span>
                   )}
@@ -388,340 +333,334 @@ function JornadaPageInner() {
           </div>
         </section>
 
-        {/* ACCESS LOCKED GUARD FOR NON-ENROLLED COURSE */}
-        {selectedCourse && !selectedCourse.isEnrolled ? (
-          <div className={`p-8 sm:p-12 rounded-3xl border text-center max-w-2xl mx-auto my-8 ${
-            isDark ? 'bg-[#0f0b15] border-white/10' : 'bg-white border-slate-200 shadow-lg'
-          }`}>
+        {loading ? (
+          <div className={`rounded-3xl border p-6 ${card}`}>
+            <LessonSkeleton />
+          </div>
+        ) : selectedCourse && !selectedCourse.isEnrolled ? (
+          <div className={`p-8 sm:p-12 rounded-3xl border text-center max-w-2xl mx-auto my-8 ${card}`}>
             <div className="size-16 rounded-3xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-5">
               <Lock className="size-8" />
             </div>
-
-            <span className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-extrabold uppercase tracking-widest">
-              CURSO BLOQUEADO
-            </span>
-
-            <h2 className="text-2xl font-bold font-display mt-3 mb-3">
-              Você ainda não está matriculado em &quot;{selectedCourse.title}&quot;
+            <h2 className="text-2xl font-bold font-display mb-3">
+              Você ainda não tem acesso a “{selectedCourse.title}”
             </h2>
-
-            <p className={`text-sm leading-relaxed mb-6 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-              {selectedCourse.description || 'Este curso possui módulos práticos, desafios passo a passo e materiais exclusivos. Matricule-se para desbloquear todas as aulas imediatamente na sua conta.'}
+            <p className={`text-sm leading-relaxed mb-6 ${soft}`}>
+              {selectedCourse.description ||
+                'Este curso tem módulos práticos, desafios passo a passo e materiais exclusivos.'}
             </p>
-
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <button
-                onClick={handleEnrollInSelected}
+                onClick={handleEnroll}
                 disabled={enrolling}
-                className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-gradient-to-r from-primary to-accent-purple text-white font-bold text-sm shadow-lg shadow-primary/20 hover:opacity-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-gradient-to-r from-primary to-accent-purple text-white font-bold text-sm shadow-lg shadow-primary/20 hover:opacity-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
               >
                 <Zap className="size-4 fill-current" />
-                <span>{enrolling ? 'Processando Matrícula...' : 'Liberar Acesso / Matricular-se'}</span>
+                {enrolling ? 'Processando...' : 'Liberar acesso'}
               </button>
-
               {enrolledCourses.length > 0 && (
                 <button
                   onClick={() => handleSelectCourse(enrolledCourses[0])}
-                  className={`w-full sm:w-auto px-6 py-3.5 rounded-xl font-bold text-sm border ${
-                    isDark ? 'border-white/10 text-slate-300 hover:bg-white/5' : 'border-slate-200 text-slate-700 hover:bg-slate-100'
+                  className={`w-full sm:w-auto px-6 py-3.5 rounded-2xl font-bold text-sm border cursor-pointer ${
+                    isDark
+                      ? 'border-white/10 text-slate-300 hover:bg-white/5'
+                      : 'border-slate-200 text-slate-700 hover:bg-slate-100'
                   }`}
                 >
-                  Voltar para Meu Curso Ativo
+                  Voltar ao meu curso
                 </button>
               )}
             </div>
           </div>
-        ) : challengesLoading ? (
-          <div className="py-20 flex flex-col items-center justify-center text-center">
-            <motion.div 
-              animate={{ rotate: 360 }}
-              transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-              className="size-8 border-2 border-primary border-t-transparent rounded-full mb-3"
-            />
-            <p className="text-xs text-slate-500">Carregando aulas do curso...</p>
-          </div>
-        ) : challenges.length === 0 ? (
-          <div className={`p-12 rounded-3xl border text-center ${
-            isDark ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'
-          }`}>
-            <Sparkles className="size-10 text-slate-500 mx-auto mb-3" />
-            <h3 className="text-lg font-bold mb-1">Nenhuma aula cadastrada para este curso ainda</h3>
-            <p className="text-xs text-slate-500">
-              O administrador está preparando as aulas deste módulo. Volte em breve!
-            </p>
-          </div>
         ) : (
-          <div className="space-y-8">
-            
-            {/* Quick Ficha do Negócio Banner if Canva Course */}
-            {isCanvaCourse && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`p-4 sm:p-5 rounded-3xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm ${
-                  isDark 
-                    ? 'bg-gradient-to-r from-primary/20 via-purple-900/10 to-transparent border-primary/30' 
-                    : 'bg-gradient-to-r from-primary/10 via-purple-50 to-white border-primary/20'
-                }`}
-              >
-                <div className="flex items-center gap-3.5">
-                  <div className="size-11 rounded-2xl bg-primary/20 flex items-center justify-center text-primary shrink-0 border border-primary/30">
-                    <ClipboardList className="size-6" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold uppercase tracking-widest text-primary font-mono">
-                        CANVA COM IA 2.0 · MATERIAL PRÁTICO
-                      </span>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Coluna principal */}
+            <div className="lg:col-span-8 space-y-6">
+              {isCanvaCourse && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`p-4 rounded-3xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                    isDark
+                      ? 'bg-gradient-to-r from-primary/20 via-purple-900/10 to-transparent border-primary/30'
+                      : 'bg-gradient-to-r from-primary/10 via-purple-50 to-white border-primary/20'
+                  }`}
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div className="size-11 rounded-2xl bg-primary/20 flex items-center justify-center text-primary shrink-0 border border-primary/30">
+                      <ClipboardList className="size-6" />
                     </div>
-                    <h3 className="text-base font-bold font-display tracking-tight">
-                      Ficha do Negócio (Exercício Módulo 1)
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Consulte os dados da sua marca para preencher nos prompts e exercícios das aulas.
-                    </p>
+                    <div>
+                      <h3 className="text-sm font-bold font-display">Ficha do Negócio</h3>
+                      <p className={`text-xs ${soft}`}>Os dados da sua marca para usar nos prompts das aulas.</p>
+                    </div>
                   </div>
-                </div>
-
-                <div className="flex items-center gap-2 w-full sm:w-auto">
                   <button
                     onClick={() => setIsSheetOpen(true)}
                     className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-primary/20 transition-all cursor-pointer"
                   >
-                    <ClipboardList className="size-4" />
-                    <span>Abrir Ficha do Negócio</span>
+                    <ClipboardList className="size-4" /> Abrir ficha
                   </button>
-                </div>
-              </motion.div>
-            )}
+                </motion.div>
+              )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              {/* Main Content Column */}
-              <div className="lg:col-span-8 space-y-12">
-                {/* Featured Challenge of the Day */}
-                {challenges.length > 0 && (
-                  <div className="space-y-6">
-                    <h2 className="text-xs font-bold text-primary uppercase tracking-widest mb-4 flex items-center gap-2">
-                      <Sparkles className="size-4" />
-                      Aula em Destaque
-                    </h2>
-                    {(() => {
-                      const currentChallenge = challenges.find(c => c.id === selectedChallengeId) || challenges[0];
-                      
-                      return (
-                        <motion.div
-                          key={currentChallenge.id}
-                          initial={{ y: 20, opacity: 0 }}
-                          animate={{ y: 0, opacity: 1 }}
-                          className={`group relative border rounded-3xl overflow-hidden transition-all ${
-                            completedItems.has(currentChallenge.id) 
-                              ? 'border-emerald-500/30 bg-emerald-500/5' 
-                              : isDark ? 'bg-white/5 border-white/10 hover:border-primary/50' : 'bg-white border-slate-200 shadow-md hover:border-primary/50'
+              {/* Aula atual */}
+              {lessonsLoading ? (
+                <div className={`rounded-3xl border p-6 ${card}`}>
+                  <LessonSkeleton />
+                </div>
+              ) : lessons.length === 0 ? (
+                <div className={`p-12 rounded-3xl border text-center ${card}`}>
+                  <Sparkles className="size-10 text-slate-500 mx-auto mb-3" />
+                  <h3 className="text-lg font-bold mb-1">Nenhuma aula cadastrada ainda</h3>
+                  <p className="text-xs text-slate-500">
+                    As aulas deste curso estão sendo preparadas. Volte em breve!
+                  </p>
+                </div>
+              ) : currentLesson ? (
+                <motion.section
+                  key={currentLesson.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={`rounded-3xl border overflow-hidden ${
+                    completedItems.has(currentLesson.id)
+                      ? 'border-emerald-500/30'
+                      : isDark
+                        ? 'border-white/10'
+                        : 'border-slate-200 shadow-sm'
+                  } ${isDark ? 'bg-white/[0.03]' : 'bg-white'}`}
+                >
+                  <div className="relative aspect-video">
+                    <Image
+                      src={
+                        getDirectDriveLink(currentLesson.thumbnail_url) ||
+                        `https://picsum.photos/seed/${currentLesson.id}/1200/675`
+                      }
+                      alt={currentLesson.title}
+                      fill
+                      className="object-cover"
+                      referrerPolicy="no-referrer"
+                      unoptimized
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
+
+                    {(currentLesson.media_url || currentLesson.url) && (
+                      <button
+                        onClick={() => setActiveVideo(currentLesson)}
+                        aria-label="Assistir aula"
+                        className="absolute inset-0 flex items-center justify-center group cursor-pointer"
+                      >
+                        <span
+                          className={`size-20 rounded-full flex items-center justify-center shadow-2xl transition-transform group-hover:scale-110 ${
+                            completedItems.has(currentLesson.id) ? 'bg-emerald-500' : 'bg-primary'
                           }`}
                         >
-                          <div className="relative h-64 sm:h-80 w-full">
-                            <Image 
-                              src={getDirectDriveLink(currentChallenge.thumbnail_url) || `https://picsum.photos/seed/${currentChallenge.id}/800/600`}
-                              alt={currentChallenge.title}
-                              fill
-                              className="object-cover opacity-80 group-hover:scale-105 transition-transform duration-500"
-                              referrerPolicy="no-referrer"
-                              unoptimized
-                            />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                            
-                            {currentChallenge.media_url && (
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <button 
-                                  onClick={() => setActiveVideo(currentChallenge)}
-                                  className={`size-20 rounded-full flex items-center justify-center shadow-2xl transform transition-transform cursor-pointer group-hover:scale-110 ${
-                                    completedItems.has(currentChallenge.id) ? 'bg-emerald-500' : 'bg-primary'
-                                  }`}
-                                >
-                                  {completedItems.has(currentChallenge.id) ? (
-                                    <CheckCircle2 className="size-10 text-white" />
-                                  ) : (
-                                    <Play className="size-10 fill-current ml-1 text-white" />
-                                  )}
-                                </button>
-                              </div>
-                            )}
-                          </div>
+                          <Play className="size-9 fill-current ml-1 text-white" />
+                        </span>
+                      </button>
+                    )}
 
-                          <div className="p-8">
-                            <div className="flex items-center justify-between gap-3 mb-3">
-                              <div className="flex items-center gap-2">
-                                <span className="px-3 py-1 rounded-full bg-primary/20 text-primary text-[10px] font-bold uppercase tracking-widest">
-                                  {selectedCourse?.title || 'Módulo'}
-                                </span>
-                                {completedItems.has(currentChallenge.id) && (
-                                  <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-500 text-[10px] font-bold uppercase tracking-widest flex items-center gap-1">
-                                    <CheckCircle2 className="size-3" />
-                                    Concluído
-                                  </span>
-                                )}
-                              </div>
+                    <div className="absolute bottom-4 left-5 right-5">
+                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        <span className="px-2.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold uppercase tracking-widest">
+                          Aula {currentIndex + 1} de {lessons.length}
+                        </span>
+                        {currentLesson.duracao && (
+                          <span className="px-2.5 py-0.5 rounded-full bg-black/50 text-white/90 text-[10px] font-bold">
+                            {currentLesson.duracao}
+                          </span>
+                        )}
+                        {completedItems.has(currentLesson.id) && (
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-widest flex items-center gap-1">
+                            <CheckCircle2 className="size-3" /> Concluída
+                          </span>
+                        )}
+                      </div>
+                      <h2 className="text-xl sm:text-2xl font-bold font-display text-white leading-tight">
+                        {currentLesson.title}
+                      </h2>
+                    </div>
+                  </div>
 
+                  <div className="p-5 sm:p-6 space-y-5">
+                    {currentLesson.description && (
+                      <p
+                        className={`text-sm leading-relaxed whitespace-pre-line ${
+                          isDark ? 'text-slate-300' : 'text-slate-700'
+                        }`}
+                      >
+                        {currentLesson.description}
+                      </p>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        onClick={() => handleToggleComplete(currentLesson.id)}
+                        className={`flex-1 min-w-[200px] py-3 px-4 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                          completedItems.has(currentLesson.id)
+                            ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
+                            : 'bg-primary text-white shadow-lg shadow-primary/25 hover:bg-primary/90'
+                        }`}
+                      >
+                        {completedItems.has(currentLesson.id) ? (
+                          <>
+                            <CheckCircle2 className="size-4" /> Aula concluída
+                          </>
+                        ) : (
+                          <>
+                            <Check className="size-4" /> Marcar como concluída
+                          </>
+                        )}
+                      </button>
+
+                      {currentLesson.pdf_url && (
+                        <a
+                          href={currentLesson.pdf_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`py-3 px-4 rounded-2xl text-sm font-bold flex items-center gap-2 border transition-colors ${
+                            isDark
+                              ? 'border-white/10 hover:bg-white/5 text-slate-300'
+                              : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          <FileText className="size-4" /> Material
+                        </a>
+                      )}
+                    </div>
+
+                    {/* Navegação entre aulas */}
+                    <div className="flex items-center justify-between gap-3 pt-4 border-t border-white/5">
+                      <button
+                        disabled={currentIndex <= 0}
+                        onClick={() => setSelectedLessonId(lessons[currentIndex - 1]?.id || null)}
+                        className={`flex items-center gap-1.5 text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ${soft} hover:text-primary`}
+                      >
+                        <ChevronLeft className="size-4" /> Aula anterior
+                      </button>
+                      <button
+                        disabled={currentIndex >= lessons.length - 1}
+                        onClick={() => setSelectedLessonId(lessons[currentIndex + 1]?.id || null)}
+                        className={`flex items-center gap-1.5 text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ${soft} hover:text-primary`}
+                      >
+                        Próxima aula <ChevronRight className="size-4" />
+                      </button>
+                    </div>
+                  </div>
+                </motion.section>
+              ) : null}
+
+              {/* Trilha (timeline) */}
+              {lessons.length > 0 && (
+                <section className={`rounded-3xl border p-5 ${card}`}>
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <h2 className="text-sm font-bold font-display flex items-center gap-2">
+                      <Sparkles className="size-4 text-primary" /> Trilha do curso
+                    </h2>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-400" />
+                      <input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Buscar aula..."
+                        className={`pl-8 pr-3 py-2 rounded-xl text-xs w-40 sm:w-56 outline-none border focus:border-primary/50 ${
+                          isDark ? 'bg-white/5 border-white/10 text-slate-100' : 'bg-white border-slate-200'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  {filteredLessons.length === 0 ? (
+                    <div className="py-8 text-center">
+                      <p className="text-sm text-slate-500 mb-2">Nenhuma aula encontrada para “{search}”.</p>
+                      <button
+                        onClick={() => setSearch('')}
+                        className="text-xs font-bold text-primary hover:underline cursor-pointer"
+                      >
+                        Limpar busca
+                      </button>
+                    </div>
+                  ) : (
+                    <ol className="relative space-y-1">
+                      {filteredLessons.map((lesson) => {
+                        // Numeração pela posição real na trilha (antes usava o índice da lista filtrada)
+                        const realIndex = lessons.findIndex((l) => l.id === lesson.id);
+                        const done = completedItems.has(lesson.id);
+                        const isCurrent = lesson.id === currentLesson?.id;
+
+                        return (
+                          <li key={lesson.id} className="relative flex gap-3 group">
+                            <div className="flex flex-col items-center shrink-0">
                               <button
-                                onClick={(e) => handleToggleComplete(e, currentChallenge.id)}
-                                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 ${
-                                  completedItems.has(currentChallenge.id)
-                                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
-                                    : isDark
-                                      ? 'bg-white/10 border-white/10 text-slate-300 hover:bg-white/20'
-                                      : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+                                onClick={() => handleToggleComplete(lesson.id)}
+                                aria-label={done ? 'Marcar como não concluída' : 'Marcar como concluída'}
+                                className={`size-9 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all cursor-pointer z-10 ${
+                                  done
+                                    ? 'bg-emerald-500 border-emerald-500 text-white'
+                                    : isCurrent
+                                      ? 'border-primary text-primary bg-primary/10'
+                                      : isDark
+                                        ? 'border-white/15 text-slate-400 hover:border-primary/50'
+                                        : 'border-slate-300 text-slate-500 hover:border-primary/50'
                                 }`}
                               >
-                                <CheckCircle2 className="size-3.5" />
-                                <span>{completedItems.has(currentChallenge.id) ? 'Concluída' : 'Marcar como Concluída'}</span>
+                                {done ? <Check className="size-4" /> : realIndex + 1}
                               </button>
+                              {realIndex < lessons.length - 1 && (
+                                <div
+                                  className={`w-0.5 flex-1 min-h-[18px] ${
+                                    done ? 'bg-emerald-500/40' : isDark ? 'bg-white/10' : 'bg-slate-200'
+                                  }`}
+                                />
+                              )}
                             </div>
 
-                            <h3 className={`text-2xl sm:text-3xl font-bold mb-3 font-display ${
-                              isDark ? 'text-slate-100' : 'text-slate-900'
-                            }`}>
-                              {currentChallenge.title}
-                            </h3>
-                            <p className={`text-sm leading-relaxed ${
-                              isDark ? 'text-slate-400' : 'text-slate-600'
-                            }`}>
-                              {currentChallenge.description}
-                            </p>
-                          </div>
-                        </motion.div>
-                      );
-                    })()}
-                  </div>
-                )}
-
-                {/* Other Lessons of this Course */}
-                {(() => {
-                  const currentChallenge = challenges.find(c => c.id === selectedChallengeId) || challenges[0];
-                  const otherChallenges = challenges.filter(c => c.id !== currentChallenge?.id);
-                  
-                  if (otherChallenges.length === 0) return null;
-
-                  return (
-                    <div className={`space-y-6 pt-12 border-t ${isDark ? 'border-white/5' : 'border-slate-200'}`}>
-                      <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">
-                        Outras Aulas deste Curso ({challenges.length} aulas no total)
-                      </h2>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                        {otherChallenges.map((challenge, index) => {
-                          const isDone = completedItems.has(challenge.id);
-                          return (
-                            <motion.div
-                              key={challenge.id}
-                              initial={{ y: 20, opacity: 0 }}
-                              whileInView={{ y: 0, opacity: 1 }}
-                              viewport={{ once: true }}
-                              transition={{ delay: index * 0.05 }}
-                              onClick={() => setSelectedChallengeId(challenge.id)}
-                              className={`group relative border rounded-3xl overflow-hidden transition-all cursor-pointer ${
-                                isDone 
-                                  ? 'border-emerald-500/30 bg-emerald-500/5' 
-                                  : isDark ? 'bg-white/5 border-white/10 hover:border-primary/50' : 'bg-white border-slate-200 shadow-sm hover:shadow-md hover:border-primary/50'
+                            <button
+                              onClick={() => setSelectedLessonId(lesson.id)}
+                              className={`flex-1 text-left mb-2 p-3 rounded-2xl border transition-all cursor-pointer ${
+                                isCurrent
+                                  ? 'border-primary/50 bg-primary/5'
+                                  : isDark
+                                    ? 'border-transparent hover:bg-white/5'
+                                    : 'border-transparent hover:bg-slate-50'
                               }`}
                             >
-                              <div className="relative h-44 w-full">
-                                <Image 
-                                  src={getDirectDriveLink(challenge.thumbnail_url) || `https://picsum.photos/seed/${challenge.id}/600/400`}
-                                  alt={challenge.title}
-                                  fill
-                                  className="object-cover opacity-80 group-hover:scale-105 transition-transform duration-500"
-                                  referrerPolicy="no-referrer"
-                                  unoptimized
-                                />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                                
-                                {challenge.media_url && (
-                                  <div className="absolute inset-0 flex items-center justify-center">
-                                    <button 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setActiveVideo(challenge);
-                                      }}
-                                      className={`size-12 rounded-full flex items-center justify-center shadow-xl transform transition-transform cursor-pointer group-hover:scale-110 ${
-                                        isDone ? 'bg-emerald-500' : 'bg-primary'
-                                      }`}
-                                    >
-                                      {isDone ? (
-                                        <CheckCircle2 className="size-6 text-white" />
-                                      ) : (
-                                        <Play className="size-6 fill-current ml-0.5 text-white" />
-                                      )}
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-
-                              <div className="p-5">
-                                <div className="flex items-center justify-between gap-2 mb-2">
-                                  <span className="text-[10px] font-bold text-slate-400 uppercase">
-                                    Aula {index + 2}
-                                  </span>
-                                  {isDone && (
-                                    <span className="text-[10px] font-bold text-emerald-500 flex items-center gap-1">
-                                      <CheckCircle2 className="size-3" />
-                                      Concluída
-                                    </span>
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className={`text-sm font-bold leading-snug ${done ? 'line-through opacity-60' : ''}`}>
+                                    {lesson.title}
+                                  </p>
+                                  {lesson.description && (
+                                    <p className={`text-xs mt-0.5 line-clamp-1 ${soft}`}>{lesson.description}</p>
                                   )}
                                 </div>
-                                <h4 className={`text-base font-bold mb-1.5 font-display line-clamp-2 ${
-                                  isDark ? 'text-slate-100' : 'text-slate-900'
-                                }`}>
-                                  {challenge.title}
-                                </h4>
-                                <p className={`text-xs line-clamp-2 ${
-                                  isDark ? 'text-slate-400' : 'text-slate-600'
-                                }`}>
-                                  {challenge.description}
-                                </p>
+                                {lesson.duracao && (
+                                  <span className={`text-[10px] font-bold shrink-0 ${soft}`}>{lesson.duracao}</span>
+                                )}
                               </div>
-                            </motion.div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-              
-              {/* Sidebar Column on Desktop */}
-              <div className="lg:col-span-4 space-y-6">
-                <div className="sticky top-24 space-y-6">
-                  <EvolutionDiary />
-                </div>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  )}
+                </section>
+              )}
+            </div>
+
+            {/* Lateral */}
+            <div className="lg:col-span-4">
+              <div className="sticky top-24 space-y-6">
+                <EvolutionDiary />
               </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* Floating Consultation Quick Button for Canva Course */}
-      {isCanvaCourse && (
-        <motion.button
-          onClick={() => setIsSheetOpen(true)}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          className="fixed bottom-24 right-4 z-40 px-4 py-3 rounded-full bg-primary hover:bg-primary/90 text-white font-bold text-xs flex items-center gap-2 shadow-2xl shadow-primary/50 border border-white/20 backdrop-blur-md cursor-pointer"
-          title="Consultar A Ficha do Meu Negócio"
-        >
-          <ClipboardList className="size-4" />
-          <span className="hidden sm:inline">Ficha do Negócio</span>
-          <span className="sm:hidden">Ficha</span>
-        </motion.button>
-      )}
-      
       <BottomNav />
 
-      {/* Business Sheet Modal */}
-      <BusinessSheetModal 
-        isOpen={isSheetOpen} 
-        onClose={() => setIsSheetOpen(false)} 
-      />
-
-      {/* Video Modal */}
+      {/* Modal de vídeo */}
       <AnimatePresence>
         {activeVideo && (
           <motion.div
@@ -732,35 +671,108 @@ function JornadaPageInner() {
             onClick={() => setActiveVideo(null)}
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
+              initial={{ scale: 0.94, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-4xl aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl select-none"
-              data-protected-video="true"
-              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              exit={{ scale: 0.94, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
+              className="relative w-full max-w-4xl"
             >
-              <iframe
-                src={getEmbedVideoUrl(activeVideo.media_url || activeVideo.url) || ''}
-                className="w-full h-full border-0 select-none"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-              />
+              <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl">
+                <iframe
+                  src={getEmbedVideoUrl(activeVideo.media_url || activeVideo.url) || ''}
+                  className="w-full h-full border-0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-3 mt-4">
+                <p className="text-sm font-bold text-white truncate">{activeVideo.title}</p>
+                {!completedItems.has(activeVideo.id) && (
+                  <button
+                    onClick={() => {
+                      handleToggleComplete(activeVideo.id);
+                      setActiveVideo(null);
+                    }}
+                    className="shrink-0 px-4 py-2.5 rounded-xl bg-primary text-white text-xs font-bold flex items-center gap-2 hover:bg-primary/90 transition-colors cursor-pointer"
+                  >
+                    <Check className="size-4" /> Concluí esta aula
+                  </button>
+                )}
+              </div>
+
               <button
                 onClick={() => setActiveVideo(null)}
-                className="absolute top-4 right-4 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors"
+                aria-label="Fechar vídeo"
+                className="absolute -top-2 right-0 sm:-right-2 p-2 rounded-full bg-black/70 text-white hover:bg-black transition-colors cursor-pointer"
               >
-                <X className="size-6" />
+                <X className="size-5" />
               </button>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Curso concluído */}
+      <AnimatePresence>
+        {courseDoneOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm"
+            onClick={() => setCourseDoneOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className={`w-full max-w-sm rounded-3xl p-8 text-center border shadow-2xl ${
+                isDark ? 'bg-[#0f0b15] border-white/10' : 'bg-white border-slate-200'
+              }`}
+            >
+              <motion.div
+                initial={{ scale: 0, rotate: -20 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ type: 'spring', stiffness: 260, damping: 16, delay: 0.1 }}
+                className="size-20 rounded-3xl bg-accent-gold/15 border border-accent-gold/30 text-accent-gold flex items-center justify-center mx-auto mb-5"
+              >
+                <Trophy className="size-10" />
+              </motion.div>
+              <h3 className="text-2xl font-bold font-display mb-2">Curso concluído! 🎉</h3>
+              <p className={`text-sm leading-relaxed mb-6 ${soft}`}>
+                Você finalizou todas as {lessons.length} aulas de {selectedCourse?.title}. Que tal compartilhar sua
+                conquista com a turma?
+              </p>
+              <div className="space-y-2">
+                <Link
+                  href="/comunidade"
+                  className="block w-full py-3 rounded-2xl bg-primary text-white font-bold text-sm hover:bg-primary/90 transition-colors"
+                >
+                  Contar para a comunidade
+                </Link>
+                <button
+                  onClick={() => setCourseDoneOpen(false)}
+                  className={`w-full py-3 rounded-2xl font-bold text-sm border cursor-pointer ${
+                    isDark
+                      ? 'border-white/10 text-slate-300 hover:bg-white/5'
+                      : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  Continuar aqui
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <BusinessSheetModal isOpen={isSheetOpen} onClose={() => setIsSheetOpen(false)} />
     </main>
   );
 }
 
-// useSearchParams exige Suspense para a página poder ser pré-renderizada
 export default function JornadaPage() {
   return (
     <Suspense fallback={null}>

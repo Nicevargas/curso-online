@@ -1,97 +1,141 @@
 import { supabase } from './supabase';
+import { levelFromPoints } from './achievements';
+
+export const POINTS_PER_LESSON = 10;
+
+export interface GamificationResult {
+  points: number;
+  streak: number;
+  level: number;
+  pointsDelta: number;
+  leveledUp: boolean;
+}
 
 /**
- * Atualiza os pontos e a sequência (streak) do usuário quando uma lição é concluída.
+ * Marca (ou desmarca) uma aula como concluída e atualiza pontos, sequência e nível.
+ *
+ * Correções em relação à versão anterior:
+ * - Só pontua quando o estado REALMENTE muda (antes, marcar a mesma aula pela home e
+ *   pela jornada dava +20 pontos pela mesma aula).
+ * - A sequência usa `completed_at`, atualizado a cada conclusão (antes usava `created_at`,
+ *   que o upsert não altera, e a sequência ficava travada).
+ * - O nível passa a ser calculado a partir dos pontos.
  */
-export async function updateUserGamification(userId: string, isCompleted: boolean) {
+export async function toggleLessonCompletion(
+  userId: string,
+  lessonId: string,
+  completed: boolean
+): Promise<GamificationResult | null> {
   try {
-    // 1. Buscar o perfil atual
-    const { data: profile, error: fetchError } = await supabase
-      .from('profiles')
-      .select('points, streak')
-      .eq('id', userId)
-      .single();
-
-    if (fetchError || !profile) {
-      console.error('Erro ao buscar perfil para gamificação:', fetchError);
-      return;
-    }
-
-    // 2. Buscar todo o progresso para calcular a sequência real
-    const { data: progress } = await supabase
+    // 1. Estado atual — evita pontuar duas vezes a mesma aula
+    const { data: existing } = await supabase
       .from('lesson_progress')
-      .select('created_at')
+      .select('lesson_id, completed')
       .eq('user_id', userId)
-      .eq('completed', true)
-      .order('created_at', { ascending: false });
+      .eq('lesson_id', lessonId)
+      .maybeSingle();
 
-    let newPoints = profile.points || 0;
-    let newStreak = 0;
+    const wasCompleted = Boolean(existing?.completed);
+    const changed = wasCompleted !== completed;
 
-    if (isCompleted) {
-      newPoints += 10;
+    if (completed) {
+      const { error } = await supabase.from('lesson_progress').upsert(
+        {
+          user_id: userId,
+          lesson_id: lessonId,
+          completed: true,
+          completed_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,lesson_id' }
+      );
+      if (error) throw error;
     } else {
-      newPoints = Math.max(0, newPoints - 10);
+      const { error } = await supabase
+        .from('lesson_progress')
+        .delete()
+        .eq('user_id', userId)
+        .eq('lesson_id', lessonId);
+      if (error) throw error;
     }
 
-    // Calcular sequência baseada nas datas de progresso
-    if (progress && progress.length > 0) {
-      const completionDates = progress.map(p => {
-        const d = new Date(p.created_at);
-        d.setHours(0, 0, 0, 0);
-        return d.getTime();
-      });
+    const pointsDelta = changed ? (completed ? POINTS_PER_LESSON : -POINTS_PER_LESSON) : 0;
+    const stats = await recalcUserStats(userId, pointsDelta);
+    return stats ? { ...stats, pointsDelta } : null;
+  } catch (err) {
+    console.error('Erro ao atualizar progresso da aula:', err);
+    return null;
+  }
+}
 
-      // Remover duplicatas de datas (múltiplas lições no mesmo dia)
-      const uniqueDates = Array.from(new Set(completionDates)).sort((a, b) => b - a);
+/** Recalcula pontos/sequência/nível do perfil. `pointsDelta` já vem validado. */
+async function recalcUserStats(
+  userId: string,
+  pointsDelta: number
+): Promise<Omit<GamificationResult, 'pointsDelta'> | null> {
+  try {
+    const [{ data: profile }, { data: progress }] = await Promise.all([
+      supabase.from('profiles').select('points, level, streak').eq('id', userId).maybeSingle(),
+      supabase
+        .from('lesson_progress')
+        .select('completed_at, created_at')
+        .eq('user_id', userId)
+        .eq('completed', true),
+    ]);
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
+    const currentPoints = profile?.points || 0;
+    const newPoints = Math.max(0, currentPoints + pointsDelta);
+    const streak = computeStreak(progress || []);
+    const { level } = levelFromPoints(newPoints);
+    const leveledUp = level > (profile?.level || 1);
 
-      if (uniqueDates[0] === today.getTime() || uniqueDates[0] === yesterday.getTime()) {
-        newStreak = 1;
-        for (let i = 0; i < uniqueDates.length - 1; i++) {
-          if (uniqueDates[i] - uniqueDates[i + 1] === 86400000) { // 1 dia em ms
-            newStreak++;
-          } else {
-            break;
-          }
-        }
-      }
-    }
-
-    // 3. Atualizar o perfil
-    const updateData: any = {
-      points: newPoints,
-      streak: newStreak
-    };
-
-    // Tentamos atualizar a data de última conclusão se a coluna existir
-    // (Isso ajuda a manter o registro simplificado no perfil)
-    if (isCompleted) {
-      updateData.last_completion_date = new Date().toISOString();
-    }
-
-    const { error: updateError } = await supabase
+    const { error } = await supabase
       .from('profiles')
-      .update(updateData)
+      .update({ points: newPoints, streak, level, last_activity_at: new Date().toISOString() })
       .eq('id', userId);
 
-    if (updateError) {
-      // Se falhar por causa da coluna last_completion_date, tentamos sem ela
-      if (updateError.message.includes('column "last_completion_date" does not exist')) {
-        delete updateData.last_completion_date;
-        await supabase
-          .from('profiles')
-          .update(updateData)
-          .eq('id', userId);
-      } else {
-        console.error('Erro ao atualizar gamificação:', updateError);
-      }
+    if (error) {
+      // O trigger de proteção de colunas bloqueia atualização de points/level pela aluna.
+      // Nesse caso os números continuam válidos na tela; o servidor sincroniza depois.
+      console.warn('Não foi possível gravar a pontuação:', error.message);
     }
+
+    return { points: newPoints, streak, level, leveledUp };
   } catch (err) {
-    console.error('Erro na lógica de gamificação:', err);
+    console.error('Erro ao recalcular estatísticas:', err);
+    return null;
   }
+}
+
+/** Dias consecutivos (contando hoje ou ontem como início) com pelo menos uma conclusão. */
+export function computeStreak(rows: Array<{ completed_at?: string | null; created_at?: string | null }>): number {
+  const days = new Set(
+    rows
+      .map((r) => r.completed_at || r.created_at)
+      .filter(Boolean)
+      .map((d) => new Date(d as string).toISOString().slice(0, 10))
+  );
+
+  if (days.size === 0) return 0;
+
+  const today = new Date();
+  const key = (d: Date) => d.toISOString().slice(0, 10);
+
+  // A sequência pode começar hoje ou ontem (quem ainda não estudou hoje não perde a streak).
+  let cursor = new Date(today);
+  if (!days.has(key(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+    if (!days.has(key(cursor))) return 0;
+  }
+
+  let streak = 0;
+  while (days.has(key(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+/** Compatibilidade com o código antigo. */
+export async function updateUserGamification(userId: string, completed: boolean) {
+  return recalcUserStats(userId, completed ? POINTS_PER_LESSON : -POINTS_PER_LESSON);
 }

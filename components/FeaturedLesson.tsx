@@ -6,7 +6,9 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
-import { updateUserGamification } from '@/lib/gamification';
+import { toggleLessonCompletion } from '@/lib/gamification';
+import { useSession } from '@/lib/SessionContext';
+import { useToast } from '@/components/ToastProvider';
 import { useTheme } from '@/lib/ThemeContext';
 
 interface LessonData {
@@ -29,6 +31,8 @@ interface FeaturedLessonProps {
 
 export default function FeaturedLesson({ lesson, loading, courseTitle }: FeaturedLessonProps) {
   const { theme } = useTheme();
+  const { user } = useSession();
+  const toast = useToast();
   const isDark = theme === 'dark';
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -43,34 +47,29 @@ export default function FeaturedLesson({ lesson, loading, courseTitle }: Feature
 
   useEffect(() => {
     async function checkProgress() {
-      if (!lesson) return;
-      
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+      if (!lesson || !user) {
         setCheckingProgress(false);
         return;
       }
 
+      // maybeSingle: com .single() o Supabase logava erro no console toda vez que a
+      // aula ainda não tinha sido concluída — que é o caso mais comum.
       const { data } = await supabase
         .from('lesson_progress')
         .select('completed')
         .eq('user_id', user.id)
         .eq('lesson_id', lesson.id)
-        .single();
+        .maybeSingle();
 
-      if (data?.completed) {
-        setIsCompleted(true);
-      }
+      setIsCompleted(Boolean(data?.completed));
       setCheckingProgress(false);
     }
 
     checkProgress();
-  }, [lesson]);
+  }, [lesson?.id, user?.id]);
 
   const handleToggleComplete = async () => {
     if (!lesson) return;
-    
-    const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       window.location.href = '/login';
       return;
@@ -79,35 +78,20 @@ export default function FeaturedLesson({ lesson, loading, courseTitle }: Feature
     const newStatus = !isCompleted;
     setIsCompleted(newStatus);
 
-    try {
-      if (newStatus) {
-        const { error: upsertError } = await supabase
-          .from('lesson_progress')
-          .upsert({
-            user_id: user.id,
-            lesson_id: lesson.id,
-            completed: true
-          });
-        
-        if (upsertError) throw upsertError;
-        
-        // Atualiza pontos e sequência
-        await updateUserGamification(user.id, true);
-      } else {
-        const { error: deleteError } = await supabase
-          .from('lesson_progress')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('lesson_id', lesson.id);
-        
-        if (deleteError) throw deleteError;
-        
-        // Remove pontos se desmarcar
-        await updateUserGamification(user.id, false);
-      }
-    } catch (err) {
-      console.error('Error toggling lesson completion:', err);
+    const result = await toggleLessonCompletion(user.id, lesson.id, newStatus);
+
+    if (!result) {
       setIsCompleted(!newStatus);
+      toast.error('Não foi possível salvar seu progresso.');
+      return;
+    }
+
+    if (newStatus) {
+      toast.celebrate();
+      toast.reward(
+        result.pointsDelta > 0 ? `+${result.pointsDelta} pontos!` : 'Aula concluída!',
+        result.leveledUp ? `Você chegou ao nível ${result.level}! 🎉` : undefined
+      );
     }
   };
 

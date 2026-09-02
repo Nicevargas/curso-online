@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @variant dark (&:where(.dark, .dark *));
 
@@ -56,4 +57,29 @@ video::-internal-media-controls-download-button {
 
 video::-webkit-media-controls-download-button {
   display: none !important;
+}
+
+
+/* Impressão: só o conteúdo marcado como imprimível sai no papel */
+@media print {
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  header,
+  nav,
+  .no-print {
+    display: none !important;
+  }
+  .print-area {
+    position: static !important;
+    inset: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #fff !important;
+    color: #000 !important;
+    padding: 0 !important;
+  }
 }
