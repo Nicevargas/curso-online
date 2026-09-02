@@ -50,3 +50,38 @@ Repositório analisado: `Nicevargas/curso-online` (commit `70134ec`, 01/09/2026)
 - `.env.example` — nomes corretos e comentários
 - `app/login/page.tsx` — mensagens de erro / `?cadastrado=true`
 - `supabase/migrations/20260901150000_fix_profiles_table_rls_and_trigger.sql` — novo
+
+---
+
+# Relatório 2 — página "Mentoria & Comunidade": post publicado não aparece
+
+## Erro 1 (causa principal) — a consulta do feed falhava silenciosamente
+
+**Onde:** `app/comunidade/page.tsx`, função `fetchPosts`.
+
+**O que acontece:** a consulta usava `profiles:user_id (name, avatar_url)` para trazer o autor junto com o post. Esse recurso do Supabase (embed) só funciona quando existe uma chave estrangeira entre as duas tabelas — e `community_posts.user_id` aponta para `auth.users`, não para `profiles`. O Supabase devolve o erro PGRST200 ("Could not find a relationship between community_posts and profiles"), e o código fazia `if (!error && data)`, ou seja, ignorava o erro e deixava a lista vazia. O `INSERT` do post funcionava (a mensagem está no banco), só a leitura quebrava — por isso "publiquei e não apareceu em lugar algum".
+
+**Correção aplicada:** o feed agora busca os posts e, em seguida, os perfis dos autores em uma segunda consulta (`profiles.in('id', ...)`), sem depender da chave estrangeira. Erros passam a aparecer na tela (caixa vermelha acima do feed) e no console.
+
+## Erro 2 — "Curtir" nunca funcionava
+
+O botão inseria `interaction_type: 'like'`, mas a tabela `post_interactions` não tem essa coluna; o Supabase recusava e o erro era ignorado. Removido do código e a coluna foi adicionada na migration por compatibilidade.
+
+## Erro 3 — outros alunos não veem posts novos sem recarregar
+
+A página assina mudanças em tempo real (`postgres_changes` em `community_posts`), mas a tabela não estava na publicação `supabase_realtime`, então o Supabase nunca envia os eventos. A migration adiciona `community_posts` e `post_interactions` à publicação.
+
+## Migration nova: `supabase/migrations/20260902090000_fix_community_relations_and_realtime.sql`
+
+Garante um perfil para cada usuário do Auth, cria as chaves estrangeiras `community_posts.user_id → profiles.id` e `post_interactions.user_id → profiles.id`, adiciona `interaction_type`, índices e a publicação realtime. Rodar no SQL Editor (depois da migration de `profiles` do relatório anterior, que cria a política de leitura pública dos perfis — sem ela o nome dos autores não aparece).
+
+## Comunidade por jornada/curso (implementado)
+
+Decisão: os grupos são as jornadas/cursos. Migration `20260902120000_community_by_journey.sql` + nova `app/comunidade/page.tsx`.
+
+- Quem participa de uma jornada: matriculado em `enrollments` (status ativo), ou jornada ativa no perfil (`profiles.journey_id`; sem jornada definida conta a jornada padrão do app), ou admin. Isso está na função `is_journey_member(jid)`, usada por todas as políticas RLS.
+- `community_posts.journey_id` (posts antigos migram para a jornada padrão). Só membros da jornada leem e publicam; cada pessoa só apaga o que é seu.
+- Nova tabela `post_comments` (respostas abaixo de cada post), com as mesmas regras.
+- Curtidas seguem a mesma regra da jornada.
+- Página: chips no topo com as jornadas em que a pessoa participa (vem de `getCoursesWithUserAccess`, a mesma lógica da home), feed filtrado pela jornada escolhida, respostas expansíveis por post, excluir próprio post/resposta, "Membros em Destaque" calculado por jornada, tempo real por jornada (posts, respostas e curtidas).
+- Ordem para rodar no SQL Editor: `20260901150000` (profiles) → `20260902090000` (comunidade) → `20260902120000` (por jornada).

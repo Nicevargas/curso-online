@@ -65,6 +65,13 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  -- Perfil órfão com o mesmo e-mail (conta apagada e recriada): religa ao novo usuário
+  UPDATE public.profiles
+  SET id = NEW.id
+  WHERE lower(email) = lower(NEW.email)
+    AND id <> NEW.id
+    AND NOT EXISTS (SELECT 1 FROM auth.users x WHERE x.id = public.profiles.id);
+
   INSERT INTO public.profiles (id, name, email, role, level, status, points, streak, plan, is_paid)
   VALUES (
     NEW.id,
