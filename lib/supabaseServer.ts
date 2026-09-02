@@ -1,83 +1,33 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Helper to find any env var regardless of exact casing, underscores, or prefix
-function getEnvVal(possibleNames: string[]): string | undefined {
-  if (typeof process === 'undefined' || !process.env) return undefined;
-  
-  // 1. Exact match first
-  for (const name of possibleNames) {
-    if (process.env[name]) return process.env[name];
-  }
+// Variáveis oficiais do projeto (mesmos nomes cadastrados na Vercel):
+//   SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
 
-  // 2. Normalized match (ignore case and underscores)
-  const envKeys = Object.keys(process.env);
-  for (const target of possibleNames) {
-    const cleanTarget = target.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const foundKey = envKeys.find(k => k.toUpperCase().replace(/[^A-Z0-9]/g, '') === cleanTarget);
-    if (foundKey && process.env[foundKey]) {
-      return process.env[foundKey];
-    }
-  }
-
-  return undefined;
-}
-
-// Server-only Supabase client with Service Role key (for KB indexing, admin auth, and RAG queries)
+// Cliente server-only com Service Role (ignora RLS). Usado em /api/auth/cadastro,
+// indexação da base de conhecimento e webhook do Mercado Pago.
 export function getSupabaseAdmin() {
-  const supabaseUrl = getEnvVal([
-    'SUPABASE_URL',
-    'NEXT_PUBLIC_SUPABASE_URL',
-    'NEXT_PUBLIC_SUPABASE_URL_KEY',
-    'SUPABASE_PROJECT_URL',
-  ]);
-
-  const serviceRoleKey = getEnvVal([
-    'SUPABASE_SERVICE_ROLE_KEY',
-    'SUPABASE_SERVICE_ROLE',
-    'SUPABASE_SERVICE_KEY',
-    'SERVICE_ROLE_KEY',
-    'MP_service_role',
-    'SUPABASE_SECRET_KEY',
-    'SERVICE_ROLE',
-  ]);
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
     throw new Error('SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configurados no servidor.');
   }
 
   return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
+    auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
-// Client for server-side read/write using anon key when service role is not available
+// Cliente server-side com Anon Key (respeita RLS), usado quando a Service Role não está disponível.
 export function getSupabaseServerClient() {
-  const supabaseUrl = getEnvVal([
-    'SUPABASE_URL',
-    'NEXT_PUBLIC_SUPABASE_URL',
-    'SUPABASE_PROJECT_URL',
-  ]);
-
-  const anonKey = getEnvVal([
-    'SUPABASE_ANON_KEY',
-    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
-    'SUPABASE_KEY',
-    'ANON_KEY',
-  ]);
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !anonKey) {
     throw new Error('SUPABASE_URL ou SUPABASE_ANON_KEY não configurados no servidor.');
   }
 
   return createClient(supabaseUrl, anonKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
+    auth: { persistSession: false, autoRefreshToken: false },
   });
 }
-
-

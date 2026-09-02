@@ -1,10 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+// SUPABASE_URL e SUPABASE_ANON_KEY chegam ao navegador via `env` em next.config.ts.
+// (Sem esse mapeamento o Next.js não expõe variáveis sem prefixo NEXT_PUBLIC_.)
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
-// Initialize with placeholders if missing to avoid build-time crashes
-// Real calls will fail gracefully if keys are not provided later
+if (!supabaseUrl || !supabaseAnonKey) {
+  const msg =
+    'SUPABASE_URL e SUPABASE_ANON_KEY não estão definidas. ' +
+    'Login e cadastro não vão funcionar até configurá-las (Vercel: Environment Variables; local: .env.local).';
+  if (typeof window !== 'undefined') {
+    console.error(msg);
+  }
+}
+
+// Placeholder apenas para não quebrar o build; em runtime o erro acima já foi logado.
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseAnonKey || 'placeholder',
@@ -14,12 +24,8 @@ export const supabase = createClient(
       autoRefreshToken: true,
       detectSessionInUrl: true,
       storageKey: 'mistika-auth-token',
-    }
+    },
   }
 );
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  if (typeof window !== 'undefined') {
-    console.warn('Supabase URL or Anon Key is missing. Please check your environment variables.');
-  }
-}
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);

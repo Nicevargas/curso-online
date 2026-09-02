@@ -2,6 +2,13 @@ import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Expõe ao navegador SOMENTE a URL e a Anon Key do Supabase (ambas públicas por
+  // design; a segurança vem do RLS). Sem isso, process.env.SUPABASE_URL é undefined
+  // no cliente e login/cadastro falham. A SERVICE_ROLE_KEY NUNCA entra aqui.
+  env: {
+    SUPABASE_URL: process.env.SUPABASE_URL ?? '',
+    SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY ?? '',
+  },
   eslint: {
     ignoreDuringBuilds: true,
   },

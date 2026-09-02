@@ -1,20 +1,27 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { motion } from 'motion/react';
 import { Mail, Lock, ArrowRight, Sparkles, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import MistikaLogo from '@/components/Logo';
 
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams.get('cadastrado') === 'true') {
+      setStatus('Conta criada! Entre com seu e-mail e senha.');
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     async function checkUser() {
@@ -52,14 +59,16 @@ export default function LoginPage() {
         window.location.href = '/';
       }
     } catch (err: any) {
+      setStatus(null);
       if (err.message?.includes('rate limit exceeded')) {
         setError('Muitas tentativas de login. Por favor, aguarde alguns minutos.');
+      } else if (err.message?.includes('Failed to fetch') || err.message?.includes('fetch failed')) {
+        setError('Não foi possível conectar ao Supabase. Verifique SUPABASE_URL / SUPABASE_ANON_KEY.');
       } else {
         setError(err.message || 'Erro ao fazer login. Verifique suas credenciais.');
       }
     } finally {
       setLoading(false);
-      if (!error) setStatus(null);
     }
   };
 
@@ -168,5 +177,14 @@ export default function LoginPage() {
         </form>
       </motion.div>
     </main>
+  );
+}
+
+// useSearchParams exige um Suspense boundary para a página poder ser pré-renderizada
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }
