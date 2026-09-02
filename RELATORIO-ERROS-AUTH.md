@@ -85,3 +85,23 @@ Decisão: os grupos são as jornadas/cursos. Migration `20260902120000_community
 - Curtidas seguem a mesma regra da jornada.
 - Página: chips no topo com as jornadas em que a pessoa participa (vem de `getCoursesWithUserAccess`, a mesma lógica da home), feed filtrado pela jornada escolhida, respostas expansíveis por post, excluir próprio post/resposta, "Membros em Destaque" calculado por jornada, tempo real por jornada (posts, respostas e curtidas).
 - Ordem para rodar no SQL Editor: `20260901150000` (profiles) → `20260902090000` (comunidade) → `20260902120000` (por jornada).
+
+---
+
+# Relatório 3 — cards de curso não abriam o curso + nova página inicial
+
+## Problema
+
+Na home, o botão "Selecionar Curso" / "Continuar Estudando" só trocava o curso ativo em memória e não navegava para lugar nenhum — por isso "clico no card e não aparece nada". O ícone pequeno "Ver Grade" levava para `/jornada`, mas essa página ignorava qual card foi clicado (lia apenas o `localStorage`/perfil). No catálogo, "Continuar Assistindo" só fechava o modal. A página `/jornada/[id]` existe, mas nada linkava para ela.
+
+## Correções
+
+- `app/jornada/page.tsx` aceita `/jornada?curso=<id>` (prioridade sobre localStorage e perfil), grava esse curso como ativo e carrega a grade dele. Perfil lido com `maybeSingle` (não quebra se ainda não existir).
+- `app/page.tsx` reescrita: clicar em qualquer parte do card abre `/jornada?curso=<id>`; o modal do catálogo tem "Abrir curso" e, após "Liberar acesso", abre o curso automaticamente.
+- `app/globals.css`: a cor `accent-purple` era usada em gradientes mas nunca foi definida — adicionada.
+
+## Nova página inicial
+
+Hero com a capa do curso em andamento, saudação por horário, frase de contexto ("faltam X aulas"), botão "Continuar de onde parei" e "Falar com a turma"; painel de nível, pontos, sequência e progresso geral animado. Cards de "Meus Cursos" com capa (`image_url` da jornada, ou imagem gerada), badge "Em andamento"/"Concluído", contagem de aulas, barra de progresso e ícone de play no hover. Seção "Sua próxima aula" (aula em destaque do curso ativo). Catálogo em carrossel horizontal só com cursos ainda não liberados. Ferramentas do Aluno em grade compacta. Diário de evolução na lateral.
+
+Dica: cadastre `image_url` em cada jornada no Supabase (tabela `journeys`) para os cards mostrarem a capa real do curso.

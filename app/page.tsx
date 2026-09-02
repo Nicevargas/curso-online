@@ -4,40 +4,42 @@ import Header from '@/components/Header';
 import FeaturedLesson from '@/components/FeaturedLesson';
 import EvolutionDiary from '@/components/EvolutionDiary';
 import BottomNav from '@/components/BottomNav';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  BookOpen, 
-  Play, 
-  X, 
-  Sparkles, 
-  Clock, 
-  Users, 
-  MessageSquare, 
-  Users2, 
-  CheckSquare, 
-  Lightbulb, 
-  ArrowRight, 
-  Layers, 
-  Lock, 
-  CheckCircle2, 
-  GraduationCap, 
-  Compass, 
+import {
+  BookOpen,
+  Play,
+  X,
+  Sparkles,
+  MessageSquare,
+  Users2,
+  CheckSquare,
+  Lightbulb,
+  ArrowRight,
+  Lock,
+  CheckCircle2,
+  GraduationCap,
+  Compass,
   ChevronRight,
-  ShieldAlert,
-  Zap
+  Zap,
+  Flame,
+  Trophy,
+  Star,
+  Clock,
+  Layers,
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { getDirectDriveLink, getEmbedVideoUrl } from '@/lib/utils';
+import { getDirectDriveLink } from '@/lib/utils';
 import { useTheme } from '@/lib/ThemeContext';
-import { 
-  CourseWithAccess, 
-  getCoursesWithUserAccess, 
-  switchActiveCourse, 
-  enrollUser, 
-  DEFAULT_JOURNEY_ID 
+import {
+  CourseWithAccess,
+  getCoursesWithUserAccess,
+  switchActiveCourse,
+  enrollUser,
+  DEFAULT_JOURNEY_ID,
 } from '@/lib/courses';
 
 interface LessonData {
@@ -52,44 +54,49 @@ interface LessonData {
   dia?: string | number;
 }
 
+function courseCover(course: CourseWithAccess) {
+  return getDirectDriveLink(course.image_url) || `https://picsum.photos/seed/${course.id}/800/450`;
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Bom dia';
+  if (h < 18) return 'Boa tarde';
+  return 'Boa noite';
+}
+
 export default function Page() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const router = useRouter();
 
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
-  
-  // Courses state
+
   const [allCourses, setAllCourses] = useState<CourseWithAccess[]>([]);
   const [enrolledCourses, setEnrolledCourses] = useState<CourseWithAccess[]>([]);
   const [activeCourseId, setActiveCourseId] = useState<string>(DEFAULT_JOURNEY_ID);
   const [activeCourse, setActiveCourse] = useState<CourseWithAccess | null>(null);
 
-  // Lesson state
   const [featuredLesson, setFeaturedLesson] = useState<LessonData | null>(null);
   const [loading, setLoading] = useState(true);
   const [lessonLoading, setLessonLoading] = useState(true);
-  const [activeVideo, setActiveVideo] = useState<string | null>(null);
 
-  // Course Details / Enrollment Modal
   const [selectedCourseModal, setSelectedCourseModal] = useState<CourseWithAccess | null>(null);
   const [enrolling, setEnrolling] = useState(false);
   const [enrollSuccess, setEnrollSuccess] = useState(false);
 
-  // Buscar a aula para o curso ativo
+  // ---------- Aula em destaque do curso ativo ----------
   const fetchFeaturedLessonForCourse = useCallback(async (userId: string, courseId: string, archetype?: string) => {
     setLessonLoading(true);
     try {
-      // 1. Obter progresso do aluno
       const { data: progressData } = await supabase
         .from('lesson_progress')
         .select('lesson_id')
         .eq('user_id', userId)
         .eq('completed', true);
-      
-      const completedIds = new Set(progressData?.map(p => p.lesson_id) || []);
+      const completedIds = new Set(progressData?.map((p) => p.lesson_id) || []);
 
-      // 2. Tentar buscar aulas da tabela 'lessons' associadas a esse curso
       const { data: courseLessons } = await supabase
         .from('lessons')
         .select('*')
@@ -98,54 +105,32 @@ export default function Page() {
         .order('created_at', { ascending: true });
 
       if (courseLessons && courseLessons.length > 0) {
-        // Encontrar a primeira aula não concluída
-        const next = courseLessons.find(l => !completedIds.has(l.id));
-        if (next) {
-          setFeaturedLesson(next);
-          setLessonLoading(false);
-          return;
-        }
-        // Se todas foram concluídas, exibe a última ou primeira
-        setFeaturedLesson(courseLessons[0]);
-        setLessonLoading(false);
+        setFeaturedLesson(courseLessons.find((l) => !completedIds.has(l.id)) || courseLessons[0]);
         return;
       }
 
-      // 3. Se não houver em 'lessons', buscar da tabela 'content' pelo archetype
-      const searchArchetype = archetype || 'Jornada';
       const { data: contentLessons } = await supabase
         .from('content')
         .select('*')
-        .eq('archetype', searchArchetype)
+        .eq('archetype', archetype || 'Jornada')
         .order('created_at', { ascending: true });
 
       if (contentLessons && contentLessons.length > 0) {
-        const nextContent = contentLessons.find(c => !completedIds.has(c.id)) || contentLessons[0];
+        const next = contentLessons.find((c) => !completedIds.has(c.id)) || contentLessons[0];
         setFeaturedLesson({
-          id: nextContent.id,
-          titulo: nextContent.title || 'Aula do Curso',
-          descricao: nextContent.description || '',
-          video_url: nextContent.media_url || nextContent.url || '',
-          capa_url: nextContent.thumbnail_url || '',
+          id: next.id,
+          titulo: next.title || 'Aula do Curso',
+          descricao: next.description || '',
+          video_url: next.media_url || next.url || '',
+          capa_url: next.thumbnail_url || '',
           pdf_url: '',
-          categoria: nextContent.archetype || 'Módulo'
+          categoria: next.archetype || 'Módulo',
         });
-        setLessonLoading(false);
         return;
       }
 
-      // 4. Fallback para aula de boas-vindas geral
-      const { data: fallback } = await supabase
-        .from('lessons')
-        .select('*')
-        .limit(1)
-        .maybeSingle();
-
-      if (fallback) {
-        setFeaturedLesson(fallback);
-      } else {
-        setFeaturedLesson(null);
-      }
+      const { data: fallback } = await supabase.from('lessons').select('*').limit(1).maybeSingle();
+      setFeaturedLesson(fallback || null);
     } catch (err) {
       console.error('Erro ao buscar aula do curso:', err);
       setFeaturedLesson(null);
@@ -154,65 +139,50 @@ export default function Page() {
     }
   }, []);
 
-  // Carregar dados e cursos
-  const loadCoursesAndLessons = useCallback(async (userId: string, currentActiveCourseId?: string) => {
-    try {
-      const { allCourses: courses, enrolledCourses: enrolled, activeCourseId: fetchedActiveId } = 
-        await getCoursesWithUserAccess(userId);
-      
-      const currentActiveId = currentActiveCourseId || fetchedActiveId || DEFAULT_JOURNEY_ID;
-      
-      setAllCourses(courses);
-      setEnrolledCourses(enrolled);
-      setActiveCourseId(currentActiveId);
+  const loadCoursesAndLessons = useCallback(
+    async (userId: string, currentActiveCourseId?: string) => {
+      try {
+        const { allCourses: courses, enrolledCourses: enrolled, activeCourseId: fetchedActiveId } =
+          await getCoursesWithUserAccess(userId);
 
-      const active = courses.find(c => c.id === currentActiveId) || enrolled[0] || courses[0];
-      setActiveCourse(active || null);
+        const currentActiveId = currentActiveCourseId || fetchedActiveId || DEFAULT_JOURNEY_ID;
+        setAllCourses(courses);
+        setEnrolledCourses(enrolled);
+        setActiveCourseId(currentActiveId);
 
-      // Buscar aula em destaque para o curso ativo
-      await fetchFeaturedLessonForCourse(userId, active?.id || currentActiveId, active?.archetype);
-    } catch (err) {
-      console.error('Erro ao carregar cursos e aulas:', err);
-    }
-  }, [fetchFeaturedLessonForCourse]);
+        const active = courses.find((c) => c.id === currentActiveId) || enrolled[0] || courses[0];
+        setActiveCourse(active || null);
+        await fetchFeaturedLessonForCourse(userId, active?.id || currentActiveId, active?.archetype);
+      } catch (err) {
+        console.error('Erro ao carregar cursos e aulas:', err);
+      }
+    },
+    [fetchFeaturedLessonForCourse]
+  );
 
   useEffect(() => {
     let isMounted = true;
 
     async function init() {
       const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-      
       if (authError || !authUser) {
         if (isMounted) window.location.href = '/login';
         return;
       }
-
       if (isMounted) setUser(authUser);
 
-      // Fetch user profile
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', authUser.id)
-        .maybeSingle();
-
-      if (isMounted && profileData) {
-        setProfile(profileData);
-      }
+      const { data: profileData } = await supabase.from('profiles').select('*').eq('id', authUser.id).maybeSingle();
+      if (isMounted && profileData) setProfile(profileData);
 
       const storedJourneyId = typeof window !== 'undefined' ? localStorage.getItem('active_journey_id') : null;
-      const initialActiveId = storedJourneyId || profileData?.journey_id || DEFAULT_JOURNEY_ID;
-
-      await loadCoursesAndLessons(authUser.id, initialActiveId);
+      await loadCoursesAndLessons(authUser.id, storedJourneyId || profileData?.journey_id || DEFAULT_JOURNEY_ID);
       if (isMounted) setLoading(false);
     }
 
     init();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
-        window.location.href = '/login';
-      }
+      if (event === 'SIGNED_OUT') window.location.href = '/login';
     });
 
     return () => {
@@ -221,8 +191,9 @@ export default function Page() {
     };
   }, [loadCoursesAndLessons]);
 
-  // Trocar curso ativo
-  const handleSelectActiveCourse = async (course: CourseWithAccess) => {
+  // ---------- Navegação ----------
+  // Abre a grade de aulas do curso. Antes só trocava o estado e nada acontecia na tela.
+  const openCourse = async (course: CourseWithAccess) => {
     if (!user) return;
     if (!course.isEnrolled) {
       setSelectedCourseModal(course);
@@ -230,11 +201,10 @@ export default function Page() {
     }
     setActiveCourseId(course.id);
     setActiveCourse(course);
-    await switchActiveCourse(user.id, course.id);
-    await fetchFeaturedLessonForCourse(user.id, course.id, course.archetype);
+    switchActiveCourse(user.id, course.id); // grava localStorage + perfil (não precisa aguardar)
+    router.push(`/jornada?curso=${course.id}`);
   };
 
-  // Realizar matrícula / liberação
   const handleEnrollInCourse = async (course: CourseWithAccess) => {
     if (!user) {
       window.location.href = '/login';
@@ -249,456 +219,360 @@ export default function Page() {
         setEnrolling(false);
         setEnrollSuccess(false);
         setSelectedCourseModal(null);
-      }, 1500);
+        router.push(`/jornada?curso=${course.id}`);
+      }, 1200);
     } else {
       setEnrolling(false);
     }
   };
 
   const studentName = profile?.name || user?.user_metadata?.name || user?.email?.split('@')[0] || 'Aluno(a)';
+  const firstName = String(studentName).split(' ')[0];
+
+  const totals = useMemo(() => {
+    const done = enrolledCourses.reduce((a, c) => a + c.completedLessonsCount, 0);
+    const all = enrolledCourses.reduce((a, c) => a + c.totalLessonsCount, 0);
+    return { done, all, pct: all > 0 ? Math.round((done / all) * 100) : 0 };
+  }, [enrolledCourses]);
+
+  const availableCourses = allCourses.filter((c) => !c.isEnrolled);
+
+  const card = isDark ? 'bg-white/[0.03] border-white/10' : 'bg-white border-slate-200 shadow-sm';
+  const soft = isDark ? 'text-slate-400' : 'text-slate-600';
+
+  if (loading) {
+    return (
+      <main className={`min-h-screen flex items-center justify-center ${isDark ? 'bg-[#000000]' : 'bg-[#f7f6f8]'}`}>
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+          className="size-8 border-2 border-primary border-t-transparent rounded-full"
+        />
+      </main>
+    );
+  }
 
   return (
-    <main className={`min-h-screen relative pb-24 transition-colors duration-200 ${
-      isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'
-    }`}>
+    <main className={`min-h-screen relative pb-24 transition-colors duration-200 ${isDark ? 'bg-[#000000] text-slate-100' : 'bg-[#f7f6f8] text-slate-900'}`}>
       <Header />
-      
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8">
-        
-        {/* Student Welcome & Course Switcher Bar */}
-        <section className={`p-6 rounded-3xl border mb-8 transition-all ${
-          isDark 
-            ? 'bg-gradient-to-r from-white/[0.04] via-primary/10 to-transparent border-white/10' 
-            : 'bg-white border-slate-200/80 shadow-sm'
-        }`}>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
+
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8">
+        {/* ===== HERO: continue de onde parou ===== */}
+        <section
+          className={`relative overflow-hidden rounded-[2rem] border mb-8 ${
+            isDark ? 'border-white/10' : 'border-slate-200 shadow-sm'
+          }`}
+        >
+          {activeCourse && (
+            <div className="absolute inset-0">
+              <Image src={courseCover(activeCourse)} alt="" fill className="object-cover" unoptimized referrerPolicy="no-referrer" />
+              <div className={`absolute inset-0 ${isDark ? 'bg-gradient-to-r from-black via-black/85 to-black/40' : 'bg-gradient-to-r from-white via-white/90 to-white/50'}`} />
+            </div>
+          )}
+          <div className="absolute -top-24 -right-24 size-72 bg-primary/30 blur-[100px] rounded-full pointer-events-none" />
+
+          <div className="relative p-6 sm:p-8 lg:p-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+            <div className="lg:col-span-7 space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] font-extrabold uppercase tracking-widest font-mono">
-                  PORTAL DO ALUNO
+                  Portal do Aluno
                 </span>
                 {profile?.role === 'admin' && (
                   <span className="px-2.5 py-0.5 rounded-full bg-accent-gold/20 text-accent-gold text-[10px] font-extrabold uppercase tracking-widest font-mono">
-                    ADMINISTRADOR
+                    Administrador
                   </span>
                 )}
               </div>
-              <h1 className="text-2xl sm:text-3xl font-bold font-display tracking-tight">
-                Olá, <span className="text-primary">{studentName}</span>! 👋
+
+              <h1 className="text-3xl sm:text-4xl font-bold font-display tracking-tight leading-tight">
+                {greeting()}, <span className="text-primary">{firstName}</span>!
               </h1>
-              <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                {enrolledCourses.length > 1 
-                  ? `Você possui acesso a ${enrolledCourses.length} cursos online. Escolha abaixo qual deseja estudar hoje.`
-                  : 'Continue seus estudos de onde parou ou explore outros cursos disponíveis na plataforma.'
-                }
-              </p>
+
+              {activeCourse ? (
+                <>
+                  <p className={`text-sm sm:text-base ${soft}`}>
+                    Você está em <span className="font-bold text-primary">{activeCourse.title}</span> —{' '}
+                    {activeCourse.progressPercent === 0
+                      ? 'que tal começar a primeira aula hoje?'
+                      : activeCourse.progressPercent === 100
+                        ? 'curso concluído, parabéns! 🎉'
+                        : `faltam ${activeCourse.totalLessonsCount - activeCourse.completedLessonsCount} aulas para concluir.`}
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                    <button
+                      onClick={() => openCourse(activeCourse)}
+                      className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-primary text-white font-bold text-sm shadow-lg shadow-primary/30 hover:bg-primary/90 hover:-translate-y-0.5 transition-all cursor-pointer"
+                    >
+                      <Play className="size-4 fill-current" />
+                      {activeCourse.progressPercent > 0 ? 'Continuar de onde parei' : 'Começar agora'}
+                    </button>
+                    <Link
+                      href="/comunidade"
+                      className={`inline-flex items-center gap-2 px-5 py-3 rounded-2xl border font-bold text-sm transition-all hover:-translate-y-0.5 ${
+                        isDark ? 'border-white/15 bg-white/5 hover:bg-white/10' : 'border-slate-200 bg-white hover:bg-slate-50'
+                      }`}
+                    >
+                      <Users2 className="size-4" />
+                      Falar com a turma
+                    </Link>
+                  </div>
+                </>
+              ) : (
+                <p className={`text-sm ${soft}`}>Escolha um curso abaixo para começar sua jornada.</p>
+              )}
             </div>
 
-            {/* Active Course Quick Selector */}
-            {enrolledCourses.length > 0 && (
-              <div className={`p-3.5 rounded-2xl border shrink-0 min-w-[280px] ${
-                isDark ? 'bg-black/40 border-white/10' : 'bg-slate-50 border-slate-200'
-              }`}>
+            {/* Stats */}
+            <div className="lg:col-span-5 grid grid-cols-3 gap-3">
+              {[
+                { icon: Trophy, label: 'Nível', value: profile?.level || 1, color: 'text-accent-gold' },
+                { icon: Star, label: 'Pontos', value: profile?.points || 0, color: 'text-primary' },
+                { icon: Flame, label: 'Sequência', value: `${profile?.streak || 0}d`, color: 'text-orange-500' },
+              ].map((s) => (
+                <motion.div
+                  key={s.label}
+                  whileHover={{ y: -3 }}
+                  className={`p-4 rounded-2xl border text-center backdrop-blur-sm ${isDark ? 'bg-black/40 border-white/10' : 'bg-white/80 border-slate-200'}`}
+                >
+                  <s.icon className={`size-5 mx-auto mb-1.5 ${s.color}`} />
+                  <div className="text-xl font-bold font-display leading-none">{s.value}</div>
+                  <div className={`text-[10px] uppercase tracking-wider font-bold mt-1 ${soft}`}>{s.label}</div>
+                </motion.div>
+              ))}
+              <div className={`col-span-3 p-4 rounded-2xl border backdrop-blur-sm ${isDark ? 'bg-black/40 border-white/10' : 'bg-white/80 border-slate-200'}`}>
                 <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider mb-2">
-                  <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Curso em Andamento</span>
-                  <span className="text-primary font-mono">{activeCourse?.progressPercent || 0}% Concluído</span>
+                  <span className={soft}>Progresso geral</span>
+                  <span className="text-primary font-mono">{totals.done}/{totals.all} aulas · {totals.pct}%</span>
                 </div>
-                <div className="flex items-center gap-2 mb-2.5">
-                  <GraduationCap className="size-4 text-primary shrink-0" />
-                  <span className="text-sm font-bold truncate">
-                    {activeCourse?.title || 'Selecione um curso'}
-                  </span>
-                </div>
-                <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
-                  <div 
-                    className="h-full bg-gradient-to-r from-primary to-accent-purple rounded-full transition-all duration-500"
-                    style={{ width: `${activeCourse?.progressPercent || 0}%` }}
+                <div className="w-full h-2 rounded-full bg-white/10 overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${totals.pct}%` }}
+                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                    className="h-full bg-gradient-to-r from-primary to-accent-purple rounded-full"
                   />
                 </div>
               </div>
-            )}
-          </div>
-
-          {/* Quick Enrolled Courses Tabs if user has multiple courses */}
-          {enrolledCourses.length > 1 && (
-            <div className="mt-6 pt-5 border-t border-white/5">
-              <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 mr-2 shrink-0">
-                  Alternar Curso:
-                </span>
-                {enrolledCourses.map((c) => {
-                  const isCurrent = c.id === activeCourseId;
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => handleSelectActiveCourse(c)}
-                      className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 border ${
-                        isCurrent
-                          ? 'bg-primary text-white border-primary shadow-sm shadow-primary/30'
-                          : isDark
-                            ? 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10 hover:text-white'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      <BookOpen className="size-3.5" />
-                      <span className="truncate max-w-[180px]">{c.title}</span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${
-                        isCurrent ? 'bg-white/20 text-white' : 'bg-black/10 dark:bg-white/10 text-slate-400'
-                      }`}>
-                        {c.progressPercent}%
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
             </div>
-          )}
+          </div>
         </section>
 
-        {/* Main 2-Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* Main Left Column */}
           <div className="lg:col-span-8 space-y-10">
-            
-            {/* 1. Featured Lesson for Active Course */}
-            <div>
-              <FeaturedLesson 
-                lesson={featuredLesson} 
-                loading={lessonLoading}
-                courseTitle={activeCourse?.title}
-              />
-            </div>
-
-            {/* 2. Meus Cursos Matriculados */}
+            {/* ===== MEUS CURSOS ===== */}
             <section>
-              <div className="flex items-center justify-between mb-4 px-1">
+              <div className="flex items-end justify-between mb-4 px-1">
                 <div>
                   <h2 className="text-xl font-bold font-display tracking-tight flex items-center gap-2">
                     <GraduationCap className="size-5 text-primary" />
-                    Meus Cursos com Acesso Liberado
+                    Meus Cursos
                   </h2>
-                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                    Cursos online disponíveis na sua conta para assistir e praticar.
-                  </p>
+                  <p className={`text-xs ${soft}`}>Clique em um curso para abrir a grade de aulas.</p>
                 </div>
-                <Link 
-                  href="/jornada" 
-                  className="flex items-center gap-1 text-xs font-bold text-primary hover:underline"
-                >
-                  <span>Ver Todos os Módulos</span>
-                  <ChevronRight className="size-3.5" />
+                <Link href="/jornada" className="flex items-center gap-1 text-xs font-bold text-primary hover:underline">
+                  Ver grade completa <ChevronRight className="size-3.5" />
                 </Link>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {enrolledCourses.map((course) => {
-                  const isActive = course.id === activeCourseId;
-                  return (
-                    <motion.div
-                      key={course.id}
-                      whileHover={{ y: -3 }}
-                      className={`relative overflow-hidden rounded-2xl p-5 border transition-all flex flex-col justify-between ${
-                        isActive
-                          ? isDark
-                            ? 'bg-gradient-to-br from-primary/20 via-black to-black border-primary/50 shadow-md shadow-primary/10'
-                            : 'bg-white border-primary/40 shadow-md'
-                          : isDark
-                            ? 'bg-white/[0.03] border-white/10 hover:border-white/20'
-                            : 'bg-white border-slate-200 hover:border-slate-300 shadow-sm'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-start justify-between gap-3 mb-3">
-                          <div className="size-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 text-primary">
-                            <BookOpen className="size-6" />
-                          </div>
-                          <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-bold uppercase tracking-wider">
-                            <CheckCircle2 className="size-3" />
-                            Acesso Liberado
-                          </span>
-                        </div>
-
-                        <h3 className="text-base font-bold font-display mb-1.5 line-clamp-2">
-                          {course.title}
-                        </h3>
-                        <p className={`text-xs mb-4 line-clamp-2 leading-relaxed ${
-                          isDark ? 'text-slate-400' : 'text-slate-600'
-                        }`}>
-                          {course.description || 'Domine conceitos práticos, desafios reais e estratégias exclusivas neste curso.'}
-                        </p>
-                      </div>
-
-                      <div className="space-y-3 pt-3 border-t border-white/5">
-                        <div className="flex items-center justify-between text-xs font-semibold">
-                          <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
-                            {course.completedLessonsCount} de {course.totalLessonsCount} aulas concluídas
-                          </span>
-                          <span className="text-primary font-bold">{course.progressPercent}%</span>
-                        </div>
-
-                        <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
-                          <div 
-                            className="h-full bg-primary rounded-full"
-                            style={{ width: `${course.progressPercent}%` }}
-                          />
-                        </div>
-
-                        <div className="flex items-center gap-2 pt-1">
-                          <button
-                            onClick={() => handleSelectActiveCourse(course)}
-                            className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
-                              isActive
-                                ? 'bg-primary text-white shadow-sm hover:bg-primary/90'
-                                : isDark
-                                  ? 'bg-white/10 hover:bg-white/20 text-white'
-                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
-                            }`}
-                          >
-                            <Play className="size-3.5 fill-current" />
-                            <span>{isActive ? 'Continuar Estudando' : 'Selecionar Curso'}</span>
-                          </button>
-                          <Link
-                            href="/jornada"
-                            onClick={() => handleSelectActiveCourse(course)}
-                            className={`p-2.5 rounded-xl border flex items-center justify-center transition-all ${
-                              isDark ? 'border-white/10 hover:bg-white/10 text-slate-300' : 'border-slate-200 hover:bg-slate-100 text-slate-700'
-                            }`}
-                            title="Ver Grade de Aulas"
-                          >
-                            <Layers className="size-4" />
-                          </Link>
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </section>
-
-            {/* 3. Catálogo de Cursos Online (Todos os Cursos da Plataforma) */}
-            {allCourses.length > 0 && (
-              <section>
-                <div className="flex items-center justify-between mb-4 px-1">
-                  <div>
-                    <h2 className="text-xl font-bold font-display tracking-tight flex items-center gap-2">
-                      <Compass className="size-5 text-accent-purple" />
-                      Catálogo de Cursos Online
-                    </h2>
-                    <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Explore todos os cursos e trilhas de formação da nossa plataforma.
-                    </p>
-                  </div>
+              {enrolledCourses.length === 0 ? (
+                <div className={`p-10 text-center rounded-3xl border border-dashed ${card}`}>
+                  <BookOpen className="size-10 text-slate-400 mx-auto mb-3" />
+                  <p className="text-sm text-slate-500">Você ainda não tem cursos liberados. Explore o catálogo abaixo.</p>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {allCourses.map((course) => {
-                    const isEnrolled = course.isEnrolled;
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  {enrolledCourses.map((course, i) => {
+                    const isActive = course.id === activeCourseId;
                     return (
-                      <div
+                      <motion.button
                         key={course.id}
-                        onClick={() => setSelectedCourseModal(course)}
-                        className={`group cursor-pointer rounded-2xl p-5 border transition-all flex flex-col justify-between ${
-                          isDark 
-                            ? 'bg-white/[0.02] border-white/10 hover:border-primary/40 hover:bg-white/[0.04]' 
-                            : 'bg-white border-slate-200 hover:border-primary/40 shadow-sm hover:shadow-md'
-                        }`}
+                        type="button"
+                        onClick={() => openCourse(course)}
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.05 }}
+                        whileHover={{ y: -4 }}
+                        whileTap={{ scale: 0.99 }}
+                        className={`group text-left relative overflow-hidden rounded-3xl border transition-all cursor-pointer ${
+                          isActive ? 'border-primary/60 shadow-lg shadow-primary/10' : isDark ? 'border-white/10 hover:border-white/25' : 'border-slate-200 hover:border-primary/40 shadow-sm hover:shadow-md'
+                        } ${isDark ? 'bg-white/[0.03]' : 'bg-white'}`}
                       >
-                        <div>
-                          <div className="flex items-start justify-between gap-2 mb-3">
-                            <span className="px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                              {course.duration || `${course.steps || 10} Módulos`}
-                            </span>
-
-                            {isEnrolled ? (
-                              <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[10px] font-bold">
-                                <CheckCircle2 className="size-3" />
-                                Matriculado
+                        {/* Capa */}
+                        <div className="relative aspect-[16/9] overflow-hidden">
+                          <Image
+                            src={courseCover(course)}
+                            alt={course.title}
+                            fill
+                            className="object-cover transition-transform duration-500 group-hover:scale-105"
+                            unoptimized
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                          <div className="absolute top-3 left-3 flex gap-2">
+                            {isActive && (
+                              <span className="px-2.5 py-1 rounded-full bg-primary text-white text-[10px] font-bold uppercase tracking-wider shadow">
+                                Em andamento
                               </span>
-                            ) : (
-                              <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold">
-                                <Lock className="size-3" />
-                                Disponível
+                            )}
+                            {course.progressPercent === 100 && (
+                              <span className="px-2.5 py-1 rounded-full bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-wider shadow">
+                                Concluído
                               </span>
                             )}
                           </div>
-
-                          <h3 className="text-base font-bold font-display mb-1.5 group-hover:text-primary transition-colors line-clamp-2">
-                            {course.title}
-                          </h3>
-                          <p className={`text-xs mb-4 line-clamp-2 leading-relaxed ${
-                            isDark ? 'text-slate-400' : 'text-slate-600'
-                          }`}>
-                            {course.description || 'Aprenda do zero ao avançado com metodologia prática e acompanhamento.'}
-                          </p>
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <span className="size-14 rounded-full bg-white/90 text-primary flex items-center justify-center shadow-xl">
+                              <Play className="size-6 fill-current ml-0.5" />
+                            </span>
+                          </div>
+                          <div className="absolute bottom-3 left-3 right-3">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-white/80">{course.archetype}</span>
+                            <h3 className="text-base font-bold font-display text-white leading-tight line-clamp-2">{course.title}</h3>
+                          </div>
                         </div>
 
-                        <div className="pt-3 border-t border-white/5 flex items-center justify-between text-xs">
-                          <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
-                            {course.steps || 10} Módulos práticos
-                          </span>
-                          <span className="font-bold text-primary flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
-                            {isEnrolled ? 'Acessar' : 'Ver Detalhes'}
-                            <ArrowRight className="size-3" />
+                        {/* Rodapé */}
+                        <div className="p-4 space-y-3">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className={`flex items-center gap-1.5 ${soft}`}>
+                              <Layers className="size-3.5" />
+                              {course.completedLessonsCount}/{course.totalLessonsCount} aulas
+                            </span>
+                            <span className={`flex items-center gap-1.5 ${soft}`}>
+                              <Clock className="size-3.5" />
+                              {course.duration || `${course.steps || 10} módulos`}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                              <div className="h-full bg-gradient-to-r from-primary to-accent-purple rounded-full transition-all" style={{ width: `${course.progressPercent}%` }} />
+                            </div>
+                            <span className="text-xs font-bold text-primary font-mono w-10 text-right">{course.progressPercent}%</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-primary group-hover:translate-x-0.5 transition-transform">
+                            {course.progressPercent > 0 ? 'Continuar curso' : 'Começar curso'}
+                            <ArrowRight className="size-3.5" />
+                          </div>
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* ===== AULA EM DESTAQUE ===== */}
+            {activeCourse && (
+              <section>
+                <div className="mb-4 px-1">
+                  <h2 className="text-xl font-bold font-display tracking-tight flex items-center gap-2">
+                    <Sparkles className="size-5 text-accent-gold" />
+                    Sua próxima aula
+                  </h2>
+                  <p className={`text-xs ${soft}`}>A próxima aula não concluída de {activeCourse.title}.</p>
+                </div>
+                <FeaturedLesson lesson={featuredLesson} loading={lessonLoading} courseTitle={activeCourse.title} />
+              </section>
+            )}
+
+            {/* ===== CATÁLOGO ===== */}
+            {availableCourses.length > 0 && (
+              <section>
+                <div className="mb-4 px-1">
+                  <h2 className="text-xl font-bold font-display tracking-tight flex items-center gap-2">
+                    <Compass className="size-5 text-accent-purple" />
+                    Descubra novos cursos
+                  </h2>
+                  <p className={`text-xs ${soft}`}>Trilhas disponíveis para liberar na sua conta.</p>
+                </div>
+
+                <div className="flex gap-4 overflow-x-auto pb-3 -mx-1 px-1 snap-x">
+                  {availableCourses.map((course) => (
+                    <motion.button
+                      key={course.id}
+                      type="button"
+                      whileHover={{ y: -4 }}
+                      onClick={() => setSelectedCourseModal(course)}
+                      className={`group text-left snap-start shrink-0 w-[260px] rounded-3xl border overflow-hidden transition-all cursor-pointer ${
+                        isDark ? 'bg-white/[0.02] border-white/10 hover:border-primary/40' : 'bg-white border-slate-200 hover:border-primary/40 shadow-sm hover:shadow-md'
+                      }`}
+                    >
+                      <div className="relative aspect-[16/10] overflow-hidden">
+                        <Image src={courseCover(course)} alt={course.title} fill className="object-cover transition-transform duration-500 group-hover:scale-105" unoptimized referrerPolicy="no-referrer" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+                        <span className="absolute top-3 left-3 flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/90 text-white text-[10px] font-bold uppercase tracking-wider">
+                          <Lock className="size-3" /> Disponível
+                        </span>
+                      </div>
+                      <div className="p-4">
+                        <h3 className="text-sm font-bold font-display mb-1 line-clamp-2 group-hover:text-primary transition-colors">{course.title}</h3>
+                        <p className={`text-xs line-clamp-2 mb-3 ${soft}`}>
+                          {course.description || 'Aprenda do zero ao avançado com metodologia prática.'}
+                        </p>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className={soft}>{course.steps || 10} módulos</span>
+                          <span className="font-bold text-primary flex items-center gap-1">
+                            Ver detalhes <ArrowRight className="size-3" />
                           </span>
                         </div>
                       </div>
-                    );
-                  })}
+                    </motion.button>
+                  ))}
                 </div>
               </section>
             )}
 
-            {/* 4. Action Cards Section (Hub de Ferramentas & Suporte) */}
+            {/* ===== HUB ===== */}
             <section>
               <div className="mb-4 px-1">
                 <h2 className="text-xl font-bold font-display tracking-tight flex items-center gap-2">
-                  <Sparkles className="size-5 text-accent-gold" />
-                  Hub do Aluno & Ferramentas Inteligentes
+                  <Zap className="size-5 text-accent-gold" />
+                  Ferramentas do Aluno
                 </h2>
-                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                  Ferramentas, mentoria e recursos de apoio aos seus cursos.
-                </p>
+                <p className={`text-xs ${soft}`}>Mentoria, comunidade e recursos de apoio aos seus cursos.</p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* 1. Conselheira & Consultora de IA */}
-                <Link href="/lyra">
-                  <motion.div 
-                    whileHover={{ y: -3 }}
-                    className={`relative overflow-hidden rounded-3xl p-6 h-full group transition-all ${
-                      isDark 
-                        ? 'bg-gradient-to-br from-primary/25 to-accent-purple/20 border border-primary/30 hover:border-primary/60' 
-                        : 'bg-white border border-primary/20 shadow-sm hover:shadow-md hover:border-primary/40'
-                    }`}
-                  >
-                    <div className="relative z-10">
-                      <div className="size-12 rounded-2xl bg-primary/20 flex items-center justify-center mb-4 border border-primary/30 text-primary">
-                        <MessageSquare className="size-6" />
+              <div className="grid grid-cols-2 gap-4">
+                {[
+                  { href: '/lyra', icon: MessageSquare, title: 'Mentora IA', desc: 'Tire dúvidas e crie prompts com a consultora.', accent: 'text-primary bg-primary/15 border-primary/30' },
+                  { href: '/comunidade', icon: Users2, title: 'Comunidade', desc: 'Converse com quem está na mesma jornada.', accent: 'text-emerald-500 bg-emerald-500/15 border-emerald-500/30' },
+                  { href: '/planner', icon: CheckSquare, title: 'Planner', desc: 'Metas, checklists e calendário de estudos.', accent: 'text-indigo-500 bg-indigo-500/15 border-indigo-500/30' },
+                  { href: '/dicas', icon: Lightbulb, title: 'Prompts & Dicas', desc: 'Fórmulas prontas de carrosséis e ganchos.', accent: 'text-accent-gold bg-accent-gold/15 border-accent-gold/30' },
+                ].map((t) => (
+                  <Link key={t.href} href={t.href}>
+                    <motion.div
+                      whileHover={{ y: -3 }}
+                      className={`h-full rounded-3xl p-5 border transition-all group ${isDark ? 'bg-white/[0.03] border-white/10 hover:border-white/25' : 'bg-white border-slate-200 shadow-sm hover:shadow-md'}`}
+                    >
+                      <div className={`size-11 rounded-2xl flex items-center justify-center mb-3 border ${t.accent}`}>
+                        <t.icon className="size-5" />
                       </div>
-                      <h3 className={`text-lg font-bold mb-1.5 font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                        Conselheira & Consultora IA
-                      </h3>
-                      <p className={`text-xs leading-relaxed mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Tire dúvidas sobre as aulas, crie prompts inteligentes, ideias de campanhas e receba consultoria estratégica.
-                      </p>
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-primary uppercase tracking-wider">
-                        <span>Consultar Mentora IA</span>
-                        <Sparkles className="size-3.5" />
+                      <h3 className="text-sm font-bold font-display mb-1">{t.title}</h3>
+                      <p className={`text-xs leading-relaxed ${soft}`}>{t.desc}</p>
+                      <div className="mt-3 flex items-center gap-1 text-[11px] font-bold text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                        Abrir <ArrowRight className="size-3" />
                       </div>
-                    </div>
-                  </motion.div>
-                </Link>
-
-                {/* 2. Mentoria & Comunidade */}
-                <Link href="/comunidade">
-                  <motion.div 
-                    whileHover={{ y: -3 }}
-                    className={`relative overflow-hidden rounded-3xl p-6 h-full group transition-all ${
-                      isDark 
-                        ? 'bg-white/[0.03] border border-white/10 hover:border-primary/30 hover:bg-white/[0.06]' 
-                        : 'bg-white border border-slate-200 shadow-sm hover:shadow-md hover:border-primary/30'
-                    }`}
-                  >
-                    <div className="relative z-10">
-                      <div className={`size-12 rounded-2xl flex items-center justify-center mb-4 border ${
-                        isDark ? 'bg-white/10 border-white/10' : 'bg-slate-100 border-slate-200'
-                      }`}>
-                        <Users2 className={`size-6 ${isDark ? 'text-slate-300' : 'text-slate-700'}`} />
-                      </div>
-                      <h3 className={`text-lg font-bold mb-1.5 font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                        Mentoria & Comunidade
-                      </h3>
-                      <p className={`text-xs leading-relaxed mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Espaço de mentoria para compartilhar suas criações, interagir com outros alunos e receber feedbacks.
-                      </p>
-                      <div className={`flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider group-hover:text-primary transition-colors ${
-                        isDark ? 'text-slate-300' : 'text-slate-700'
-                      }`}>
-                        <span>Acessar Comunidade</span>
-                        <ArrowRight className="size-3.5" />
-                      </div>
-                    </div>
-                  </motion.div>
-                </Link>
-
-                {/* 3. Planner de Estudos & Metas */}
-                <Link href="/planner">
-                  <motion.div 
-                    whileHover={{ y: -3 }}
-                    className={`relative overflow-hidden rounded-3xl p-6 h-full group transition-all ${
-                      isDark 
-                        ? 'bg-gradient-to-br from-indigo-500/20 to-primary/20 border border-indigo-500/20 hover:border-indigo-500/50' 
-                        : 'bg-white border border-indigo-200 shadow-sm hover:shadow-md hover:border-indigo-300'
-                    }`}
-                  >
-                    <div className="relative z-10">
-                      <div className="size-12 rounded-2xl bg-indigo-500/20 flex items-center justify-center mb-4 border border-indigo-500/30 text-indigo-500">
-                        <CheckSquare className="size-6" />
-                      </div>
-                      <h3 className={`text-lg font-bold mb-1.5 font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                        Planner de Estudos & Metas
-                      </h3>
-                      <p className={`text-xs leading-relaxed mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Organize seu plano de estudos, checklists de tarefas, calendário de publicações e metas de conclusão.
-                      </p>
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-500 uppercase tracking-wider group-hover:text-indigo-400 transition-colors">
-                        <span>Abrir Planner</span>
-                        <ArrowRight className="size-3.5" />
-                      </div>
-                    </div>
-                  </motion.div>
-                </Link>
-
-                {/* 4. Dicas & Fórmulas Prontas */}
-                <Link href="/dicas">
-                  <motion.div 
-                    whileHover={{ y: -3 }}
-                    className={`relative overflow-hidden rounded-3xl p-6 h-full group transition-all ${
-                      isDark 
-                        ? 'bg-gradient-to-br from-accent-gold/20 to-amber-500/20 border border-accent-gold/20 hover:border-accent-gold/50' 
-                        : 'bg-white border border-amber-200 shadow-sm hover:shadow-md hover:border-amber-300'
-                    }`}
-                  >
-                    <div className="relative z-10">
-                      <div className="size-12 rounded-2xl bg-accent-gold/20 flex items-center justify-center mb-4 border border-accent-gold/30 text-accent-gold">
-                        <Lightbulb className="size-6" />
-                      </div>
-                      <h3 className={`text-lg font-bold mb-1.5 font-display ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                        Prompts & Dicas Estratégicas
-                      </h3>
-                      <p className={`text-xs leading-relaxed mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Comandos prontos de IA, fórmulas de carrosséis de alta conversão, ganchos magnéticos e paletas visuais.
-                      </p>
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-accent-gold uppercase tracking-wider group-hover:text-amber-400 transition-colors">
-                        <span>Ver Banco de Prompts</span>
-                        <Sparkles className="size-3.5" />
-                      </div>
-                    </div>
-                  </motion.div>
-                </Link>
+                    </motion.div>
+                  </Link>
+                ))}
               </div>
             </section>
           </div>
-          
-          {/* Sidebar Column on Desktop */}
-          <div className="lg:col-span-4 space-y-6">
+
+          {/* Sidebar */}
+          <div className="lg:col-span-4">
             <div className="sticky top-24 space-y-6">
               <EvolutionDiary />
             </div>
           </div>
         </div>
 
-        {/* Footer */}
         <footer className="mt-16 pt-8 pb-12 border-t border-white/5 text-center text-xs text-slate-500">
           <div className="flex flex-wrap items-center justify-center gap-4 mb-2">
-            <Link href="/privacidade" className="hover:text-slate-400 underline underline-offset-2 transition-colors">
-              Política de Privacidade
-            </Link>
+            <Link href="/privacidade" className="hover:text-slate-400 underline underline-offset-2 transition-colors">Política de Privacidade</Link>
             <span>•</span>
-            <Link href="/perfil" className="hover:text-slate-400 underline underline-offset-2 transition-colors">
-              Meus Cursos & Perfil
-            </Link>
+            <Link href="/perfil" className="hover:text-slate-400 underline underline-offset-2 transition-colors">Meus Cursos & Perfil</Link>
           </div>
           <p>© {new Date().getFullYear()} Plataforma de Cursos Online. Todos os direitos reservados.</p>
         </footer>
@@ -706,7 +580,7 @@ export default function Page() {
 
       <BottomNav />
 
-      {/* Course Details & Enrollment Modal */}
+      {/* ===== MODAL: detalhes / matrícula ===== */}
       <AnimatePresence>
         {selectedCourseModal && (
           <motion.div
@@ -720,134 +594,73 @@ export default function Page() {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className={`relative w-full max-w-lg rounded-3xl p-6 sm:p-8 border shadow-2xl ${
-                isDark ? 'bg-[#0f0b15] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'
-              }`}
+              className={`relative w-full max-w-lg rounded-3xl overflow-hidden border shadow-2xl ${isDark ? 'bg-[#0f0b15] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
               onClick={(e) => e.stopPropagation()}
             >
-              <button
-                onClick={() => setSelectedCourseModal(null)}
-                className="absolute top-5 right-5 p-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-              >
-                <X className="size-5" />
-              </button>
-
-              <div className="flex items-center gap-3 mb-4">
-                <div className="size-14 rounded-2xl bg-primary/20 border border-primary/30 flex items-center justify-center text-primary">
-                  <GraduationCap className="size-8" />
-                </div>
-                <div>
-                  <span className="text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-primary/20 text-primary">
-                    CURSO ONLINE
+              <div className="relative aspect-[16/8]">
+                <Image src={courseCover(selectedCourseModal)} alt={selectedCourseModal.title} fill className="object-cover" unoptimized referrerPolicy="no-referrer" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
+                <button
+                  onClick={() => setSelectedCourseModal(null)}
+                  className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors cursor-pointer"
+                >
+                  <X className="size-5" />
+                </button>
+                <div className="absolute bottom-4 left-5 right-5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-primary text-white">
+                    {selectedCourseModal.archetype || 'Curso online'}
                   </span>
-                  <h3 className="text-xl font-bold font-display mt-1">
-                    {selectedCourseModal.title}
-                  </h3>
+                  <h3 className="text-xl font-bold font-display text-white mt-2 leading-tight">{selectedCourseModal.title}</h3>
                 </div>
               </div>
 
-              <p className={`text-sm leading-relaxed mb-6 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                {selectedCourseModal.description || 'Curso prático passo a passo com aulas gravadas, desafios aplicados, materiais de apoio para download e suporte.'}
-              </p>
+              <div className="p-6 space-y-5">
+                <p className={`text-sm leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {selectedCourseModal.description || 'Curso prático passo a passo com aulas gravadas, desafios aplicados, materiais de apoio e suporte.'}
+                </p>
 
-              <div className={`p-4 rounded-2xl border mb-6 space-y-2 text-xs ${
-                isDark ? 'bg-black/40 border-white/5' : 'bg-slate-50 border-slate-200'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Total de Módulos:</span>
-                  <span className="font-bold">{selectedCourseModal.steps || 10} Módulos</span>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  {[
+                    { label: 'Módulos', value: selectedCourseModal.steps || 10 },
+                    { label: 'Duração', value: selectedCourseModal.duration || 'Imediato' },
+                    { label: 'Status', value: selectedCourseModal.isEnrolled ? 'Liberado' : 'Disponível' },
+                  ].map((s) => (
+                    <div key={s.label} className={`p-3 rounded-2xl border ${isDark ? 'bg-black/40 border-white/5' : 'bg-slate-50 border-slate-200'}`}>
+                      <div className="text-sm font-bold">{s.value}</div>
+                      <div className={`text-[10px] uppercase tracking-wider font-bold ${soft}`}>{s.label}</div>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Duração / Formato:</span>
-                  <span className="font-bold">{selectedCourseModal.duration || 'Acesso Imediato'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Status na sua conta:</span>
-                  <span className={`font-bold ${selectedCourseModal.isEnrolled ? 'text-emerald-500' : 'text-amber-400'}`}>
-                    {selectedCourseModal.isEnrolled ? 'Matriculado (Acesso Liberado)' : 'Disponível para Matrícula'}
-                  </span>
-                </div>
+
+                {enrollSuccess ? (
+                  <div className="p-4 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-center font-bold text-sm flex items-center justify-center gap-2">
+                    <CheckCircle2 className="size-5" /> Matrícula ativada! Abrindo o curso...
+                  </div>
+                ) : selectedCourseModal.isEnrolled ? (
+                  <button
+                    onClick={() => {
+                      const c = selectedCourseModal;
+                      setSelectedCourseModal(null);
+                      openCourse(c);
+                    }}
+                    className="w-full py-3.5 rounded-2xl bg-primary text-white font-bold text-sm shadow-md hover:bg-primary/90 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Play className="size-4 fill-current" /> Abrir curso
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => handleEnrollInCourse(selectedCourseModal)}
+                      disabled={enrolling}
+                      className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-primary to-accent-purple text-white font-bold text-sm shadow-lg shadow-primary/20 hover:opacity-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                    >
+                      <Zap className="size-4 fill-current" />
+                      {enrolling ? 'Liberando acesso...' : 'Liberar acesso agora'}
+                    </button>
+                    <p className="text-[11px] text-center text-slate-500">O curso será adicionado ao seu painel e aberto em seguida.</p>
+                  </div>
+                )}
               </div>
-
-              {enrollSuccess ? (
-                <div className="p-4 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-center font-bold text-sm flex items-center justify-center gap-2">
-                  <CheckCircle2 className="size-5" />
-                  <span>Matrícula ativada com sucesso!</span>
-                </div>
-              ) : selectedCourseModal.isEnrolled ? (
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => {
-                      handleSelectActiveCourse(selectedCourseModal);
-                      setSelectedCourseModal(null);
-                    }}
-                    className="flex-1 py-3 px-4 rounded-xl bg-primary text-white font-bold text-sm shadow-md hover:bg-primary/90 transition-all flex items-center justify-center gap-2"
-                  >
-                    <Play className="size-4 fill-current" />
-                    <span>Continuar Assistindo</span>
-                  </button>
-                  <Link
-                    href="/jornada"
-                    onClick={() => {
-                      handleSelectActiveCourse(selectedCourseModal);
-                      setSelectedCourseModal(null);
-                    }}
-                    className={`py-3 px-4 rounded-xl font-bold text-sm border flex items-center justify-center gap-2 transition-all ${
-                      isDark ? 'border-white/10 hover:bg-white/10' : 'border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span>Ver Grade</span>
-                  </Link>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <button
-                    onClick={() => handleEnrollInCourse(selectedCourseModal)}
-                    disabled={enrolling}
-                    className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-primary to-accent-purple text-white font-bold text-sm shadow-lg shadow-primary/20 hover:opacity-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    <Zap className="size-4 fill-current" />
-                    <span>{enrolling ? 'Processando Matrícula...' : 'Liberar Acesso / Matricular-se Agora'}</span>
-                  </button>
-                  <p className="text-[11px] text-center text-slate-500">
-                    O acesso a este curso será adicionado ao seu painel de estudos.
-                  </p>
-                </div>
-              )}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Video Modal */}
-      <AnimatePresence>
-        {activeVideo && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm"
-            onClick={() => setActiveVideo(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-4xl aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <iframe
-                src={getEmbedVideoUrl(activeVideo) || ''}
-                className="w-full h-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-              />
-              <button
-                onClick={() => setActiveVideo(null)}
-                className="absolute top-4 right-4 p-2 rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors"
-              >
-                <X className="size-6" />
-              </button>
             </motion.div>
           </motion.div>
         )}

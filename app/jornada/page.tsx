@@ -22,7 +22,8 @@ import {
   Layers,
   Zap
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -57,7 +58,9 @@ interface DiaryEntry {
   created_at: string;
 }
 
-export default function JornadaPage() {
+function JornadaPageInner() {
+  const searchParams = useSearchParams();
+  const cursoParam = searchParams.get('curso');
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
@@ -160,14 +163,15 @@ export default function JornadaPage() {
           .from('profiles')
           .select('role, level, journey_id')
           .eq('id', authUser.id)
-          .single();
+          .maybeSingle();
 
         if (isMounted && profileData) {
           setProfile(profileData);
         }
 
+        // Prioridade: curso vindo da URL (/jornada?curso=ID) > último curso ativo > perfil > padrão
         const storedJourneyId = typeof window !== 'undefined' ? localStorage.getItem('active_journey_id') : null;
-        const initialCourseId = storedJourneyId || profileData?.journey_id || DEFAULT_JOURNEY_ID;
+        const initialCourseId = cursoParam || storedJourneyId || profileData?.journey_id || DEFAULT_JOURNEY_ID;
 
         // Fetch all courses with access
         const { allCourses: courses, enrolledCourses: enrolled } = await getCoursesWithUserAccess(authUser.id);
@@ -181,6 +185,9 @@ export default function JornadaPage() {
           setSelectedCourse(current || null);
 
           if (current && current.isEnrolled) {
+            if (cursoParam && current.id === cursoParam) {
+              await switchActiveCourse(authUser.id, current.id);
+            }
             await loadChallengesForCourse(authUser.id, current);
           }
         }
@@ -222,7 +229,7 @@ export default function JornadaPage() {
       isMounted = false;
       supabase.removeChannel(diarySubscription);
     };
-  }, [user?.id]);
+  }, [user?.id, cursoParam]);
 
   const handleSelectCourse = async (course: CourseWithAccess) => {
     if (!user) return;
@@ -750,5 +757,14 @@ export default function JornadaPage() {
         )}
       </AnimatePresence>
     </main>
+  );
+}
+
+// useSearchParams exige Suspense para a página poder ser pré-renderizada
+export default function JornadaPage() {
+  return (
+    <Suspense fallback={null}>
+      <JornadaPageInner />
+    </Suspense>
   );
 }
